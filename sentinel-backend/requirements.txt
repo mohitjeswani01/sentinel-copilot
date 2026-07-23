@@ -1,0 +1,30 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Sentinel Copilot Backend — Python Dependencies
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Web Framework & Server
+fastapi>=0.110.0
+uvicorn>=0.28.0
+
+# Configuration & Validation
+pydantic>=2.6.0
+pydantic-settings>=2.2.0
+python-dotenv
+
+# Container Management
+docker>=7.0.0
+
+# OpenTelemetry — Core
+opentelemetry-api
+opentelemetry-sdk
+
+# OpenTelemetry — OTLP Exporters (SigNoz ingestion)
+opentelemetry-exporter-otlp-proto-grpc
+opentelemetry-exporter-otlp-proto-http
+
+# HTTP / Async Clients
+httpx>=0.27.0
+requests>=2.31.0
+
+# Testing
+pytest>=8.0.0
