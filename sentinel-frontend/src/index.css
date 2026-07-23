@@ -1,0 +1,192 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 240 10% 3.9%;
+    --foreground: 0 0% 95%;
+
+    --card: 240 6% 6%;
+    --card-foreground: 0 0% 95%;
+
+    --popover: 240 6% 6%;
+    --popover-foreground: 0 0% 95%;
+
+    --primary: 187 100% 50%;
+    --primary-foreground: 240 10% 3.9%;
+
+    --secondary: 240 4% 16%;
+    --secondary-foreground: 0 0% 85%;
+
+    --muted: 240 4% 16%;
+    --muted-foreground: 240 5% 55%;
+
+    --accent: 240 4% 16%;
+    --accent-foreground: 0 0% 95%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 98%;
+
+    --warning: 25 95% 53%;
+    --warning-foreground: 240 10% 3.9%;
+
+    --success: 142 71% 45%;
+    --success-foreground: 240 10% 3.9%;
+
+    --cyber: 187 100% 50%;
+    --cyber-foreground: 240 10% 3.9%;
+    --cyber-glow: 187 100% 50%;
+
+    --signal: 25 95% 53%;
+    --signal-foreground: 240 10% 3.9%;
+
+    --threat-critical: 0 72% 51%;
+    --threat-high: 25 95% 53%;
+    --threat-medium: 45 93% 47%;
+
+    --border: 240 4% 16%;
+    --input: 240 4% 16%;
+    --ring: 187 100% 50%;
+
+    --radius: 0.5rem;
+
+    --sidebar-background: 240 8% 5%;
+    --sidebar-foreground: 240 5% 65%;
+    --sidebar-primary: 187 100% 50%;
+    --sidebar-primary-foreground: 240 10% 3.9%;
+    --sidebar-accent: 240 4% 12%;
+    --sidebar-accent-foreground: 0 0% 95%;
+    --sidebar-border: 240 4% 12%;
+    --sidebar-ring: 187 100% 50%;
+
+    --glass: 240 6% 6% / 0.7;
+    --glass-border: 240 4% 20%;
+
+    --chart-1: 187 100% 50%;
+    --chart-2: 142 71% 45%;
+    --chart-3: 25 95% 53%;
+    --chart-4: 280 65% 60%;
+    --chart-5: 0 72% 51%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  /* Scrollbar styling */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: hsl(240 10% 3.9%);
+  }
+  ::-webkit-scrollbar-thumb {
+    background: hsl(240 4% 16%);
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(240 4% 25%);
+  }
+}
+
+@layer utilities {
+  .glass-panel {
+    @apply bg-card/70 backdrop-blur-xl border border-border/50;
+  }
+
+  .glass-header {
+    @apply bg-card/50 backdrop-blur-2xl border-b border-border/30;
+  }
+
+  .glow-border {
+    box-shadow: 0 0 0 1px hsl(var(--border)),
+                0 0 15px -3px hsl(var(--cyber) / 0.1);
+  }
+
+  .glow-cyber {
+    box-shadow: 0 0 20px -5px hsl(var(--cyber) / 0.3);
+  }
+
+  .card-hover {
+    @apply transition-all duration-200;
+  }
+  .card-hover:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px -5px hsl(0 0% 0% / 0.3),
+                0 0 0 1px hsl(var(--border));
+  }
+
+  .font-mono-id {
+    font-family: 'JetBrains Mono', monospace;
+    @apply text-xs tracking-tight;
+  }
+
+  .threat-pulse {
+    animation: threat-pulse 2s ease-in-out infinite;
+  }
+
+  @keyframes threat-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+  }
+
+  .terminal-line {
+    font-family: 'JetBrains Mono', monospace;
+    @apply text-sm leading-relaxed;
+  }
+
+  .gradient-cyber {
+    background: linear-gradient(135deg, hsl(var(--cyber)) 0%, hsl(187 80% 40%) 100%);
+  }
+
+  .gradient-signal {
+    background: linear-gradient(135deg, hsl(var(--signal)) 0%, hsl(15 90% 45%) 100%);
+  }
+
+  .gradient-threat {
+    background: linear-gradient(135deg, hsl(var(--threat-critical)) 0%, hsl(350 80% 45%) 100%);
+  }
+
+  .text-cyber {
+    color: hsl(var(--cyber));
+  }
+
+  .text-signal {
+    color: hsl(var(--signal));
+  }
+
+  .text-success-val {
+    color: hsl(var(--success));
+  }
+
+  .text-threat {
+    color: hsl(var(--threat-critical));
+  }
+
+  .bg-cyber\/10 {
+    background-color: hsl(var(--cyber) / 0.1);
+  }
+
+  .bg-signal\/10 {
+    background-color: hsl(var(--signal) / 0.1);
+  }
+
+  .bg-success\/10 {
+    background-color: hsl(var(--success) / 0.1);
+  }
+
+  .bg-threat\/10 {
+    background-color: hsl(var(--threat-critical) / 0.1);
+  }
+}
