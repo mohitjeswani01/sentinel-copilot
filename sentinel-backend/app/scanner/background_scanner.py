@@ -25,10 +25,12 @@ from app.core.docker_bridge import (
     get_container_stats,
     list_running_containers,
 )
+from app.observability.mcp_client import SentinelMCPClient
 from app.observability.metrics_emitter import SentinelMetricsEmitter
 from app.trust_engine.scorer import calculate_trust_score
 from app.trust_engine.vectors.configuration import score_configuration
 from app.trust_engine.vectors.identity import score_identity
+from app.trust_engine.vectors.llm_behavior import score_llm_behavior
 from app.trust_engine.vectors.network import score_network
 from app.trust_engine.vectors.resources import score_resources
 
@@ -50,8 +52,9 @@ _scanner_task: asyncio.Task[None] | None = None
 _last_scan_results: dict[str, dict[str, Any]] = {}
 
 
-def _score_container(
+async def _score_container(
     container_summary: dict[str, Any],
+    mcp_client: SentinelMCPClient | None = None,
 ) -> dict[str, Any] | None:
     """Run all trust vectors on a single container and return results.
 
@@ -83,17 +86,27 @@ def _score_container(
     net_score, net_reason = score_network(inspect_data)
     res_score, res_reason = score_resources(stats_data, inspect_data)
 
+    if mcp_client is not None:
+        try:
+            llm_score, llm_reason = await score_llm_behavior(cname, mcp_client)
+        except Exception as exc:
+            logger.warning("Could not score LLM behavior for %s: %s", cname, exc)
+            llm_score, llm_reason = 100.0, f"LLM check error ({exc}) — not applicable"
+    else:
+        llm_score, llm_reason = 100.0, "No LLM activity detected — not applicable"
+
     vector_scores: dict[str, float] = {
         "identity": id_score,
         "configuration": cfg_score,
         "network": net_score,
         "resources": res_score,
+        "llm_behavior": llm_score,
     }
 
     trust_score, risk_tier = calculate_trust_score(vector_scores)
 
     logger.info(
-        "Container %s (%s): Trust=%.1f [%s]  id=%.0f cfg=%.0f net=%.0f res=%.0f",
+        "Container %s (%s): Trust=%.1f [%s]  id=%.0f cfg=%.0f net=%.0f res=%.0f llm=%.0f",
         cname,
         cid,
         trust_score,
@@ -102,6 +115,7 @@ def _score_container(
         cfg_score,
         net_score,
         res_score,
+        llm_score,
     )
 
     return {
@@ -115,6 +129,7 @@ def _score_container(
             "configuration": cfg_reason,
             "network": net_reason,
             "resources": res_reason,
+            "llm_behavior": llm_reason,
         },
     }
 
@@ -136,33 +151,50 @@ async def _scan_loop() -> None:
             containers = list_running_containers()
             logger.info("Scan cycle: %d running container(s) found", len(containers))
 
+            mcp_client: SentinelMCPClient | None = None
+            try:
+                mcp = SentinelMCPClient()
+                await mcp.__aenter__()
+                await mcp.initialize()
+                await mcp.send_initialized_notification()
+                mcp_client = mcp
+            except Exception as exc:
+                logger.debug("MCP client connection unavailable for scanner cycle: %s", exc)
+
             current_ids: set[str] = set()
-            for container in containers:
-                try:
-                    result = _score_container(container)
-                    if result is not None:
-                        cid = result["container_id"]
-                        current_ids.add(cid)
-                        _last_scan_results[cid] = result
-                        _emitter.emit_container_trust_metrics(
-                            container_id=cid,
-                            container_name=result["container_name"],
-                            trust_score=result["trust_score"],
-                            vector_scores=result["vector_scores"],
-                        )
-                        # Fire copilot cycle as background task for risky containers.
-                        # Import here to avoid circular imports at module level.
-                        if result["risk_tier"] in _COPILOT_INVESTIGATE_TIERS:
-                            from app.copilot.loop import run_copilot_cycle  # noqa: PLC0415
-                            asyncio.get_event_loop().create_task(
-                                run_copilot_cycle(cid),
-                                name=f"copilot-cycle-{cid[:12]}",
+            try:
+                for container in containers:
+                    try:
+                        result = await _score_container(container, mcp_client=mcp_client)
+                        if result is not None:
+                            cid = result["container_id"]
+                            current_ids.add(cid)
+                            _last_scan_results[cid] = result
+                            _emitter.emit_container_trust_metrics(
+                                container_id=cid,
+                                container_name=result["container_name"],
+                                trust_score=result["trust_score"],
+                                vector_scores=result["vector_scores"],
                             )
-                except Exception:
-                    logger.exception(
-                        "Error scoring container %s — continuing",
-                        container.get("name", container.get("id", "?")),
-                    )
+                            # Fire copilot cycle as background task for risky containers.
+                            # Import here to avoid circular imports at module level.
+                            if result["risk_tier"] in _COPILOT_INVESTIGATE_TIERS:
+                                from app.copilot.loop import run_copilot_cycle  # noqa: PLC0415
+                                asyncio.get_event_loop().create_task(
+                                    run_copilot_cycle(cid),
+                                    name=f"copilot-cycle-{cid[:12]}",
+                                )
+                    except Exception:
+                        logger.exception(
+                            "Error scoring container %s — continuing",
+                            container.get("name", container.get("id", "?")),
+                        )
+            finally:
+                if mcp_client is not None:
+                    try:
+                        await mcp_client.__aexit__(None, None, None)
+                    except Exception:
+                        pass
 
             # Prune containers that are no longer running
             stale = set(_last_scan_results.keys()) - current_ids

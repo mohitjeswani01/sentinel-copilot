@@ -4,13 +4,13 @@ Sentinel Copilot — Trust Score Aggregator.
 Combines individual vector scores into a single weighted Trust Score and
 maps it to a human-readable risk tier.
 
-Weight breakdown (4 active vectors):
-  * Identity:      30 %
-  * Configuration:  30 %
-  * Network:        20 %
-  * Resources:      20 %
-  * (llm_behavior:  0 % — not yet implemented; when added, rebalance
-     weights across all 5 vectors, e.g. 25/25/15/15/20 or similar.)
+Weight breakdown (5 active vectors):
+  * Identity:      25 %
+  * Configuration:  25 %
+  * Network:        15 %
+  * Resources:      15 %
+  * LLM Behavior:   20 %  (returns neutral 100 for non-LLM containers,
+    so this vector never penalises containers that aren't LLM agents)
 
 Risk tier thresholds:
   * < 40  → CRITICAL
@@ -26,13 +26,12 @@ import logging
 logger = logging.getLogger(__name__)
 
 # ── Weight configuration ─────────────────────────────────────────────────────
-# NOTE: When the llm_behavior vector is implemented, add it here and
-#       rebalance so all weights sum to 1.0.
 VECTOR_WEIGHTS: dict[str, float] = {
-    "identity": 0.30,
-    "configuration": 0.30,
-    "network": 0.20,
-    "resources": 0.20,
+    "identity": 0.25,
+    "configuration": 0.25,
+    "network": 0.15,
+    "resources": 0.15,
+    "llm_behavior": 0.20,
 }
 
 # ── Risk tier thresholds ─────────────────────────────────────────────────────
