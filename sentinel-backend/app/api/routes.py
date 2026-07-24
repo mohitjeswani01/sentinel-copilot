@@ -19,6 +19,8 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 
 from app.core.docker_bridge import kill_container
+from app.copilot.investigator import Investigator
+from app.models.schemas import InvestigationResult
 from app.scanner.background_scanner import get_container_result, get_scan_results
 
 logger = logging.getLogger(__name__)
@@ -81,6 +83,38 @@ async def kill_container_endpoint(container_id: str) -> dict[str, Any]:
         raise HTTPException(
             status_code=500,
             detail=f"Error killing container: {exc}",
+        ) from exc
+
+
+@router.get("/containers/{container_id}/investigation", tags=["containers"], response_model=InvestigationResult)
+async def investigate_container(container_id: str) -> InvestigationResult:
+    """Run an Investigator pass on one container and return a structured result.
+
+    Reads the container's latest trust-score data from the in-memory scan
+    store, enriches it with real SigNoz traces + logs via the MCP client,
+    and (for CRITICAL containers) auto-creates a SigNoz alert rule.
+    """
+    scan_result = get_container_result(container_id)
+    if scan_result is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Container '{container_id}' not found in scan results. "
+                   "Ensure the background scanner has completed at least one cycle.",
+        )
+
+    try:
+        async with Investigator() as inv:
+            return await inv.investigate(
+                container_id=scan_result["container_id"],
+                container_name=scan_result["container_name"],
+                trust_score=scan_result["trust_score"],
+                vector_scores=scan_result["vector_scores"],
+                vector_reasons=scan_result.get("vector_reasons", {}),
+            )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Investigation failed: {exc}",
         ) from exc
 
 
