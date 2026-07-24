@@ -70,3 +70,54 @@ class InvestigationResult(BaseModel):
         default_factory=lambda: datetime.now(timezone.utc).isoformat(),
         description="ISO-8601 timestamp of when the investigation ran",
     )
+
+
+# ── Remediation Models ───────────────────────────────────────────────────────
+
+class RemediationResult(BaseModel):
+    """Structured output of ``Remediator.remediate()``."""
+
+    container_id: str
+    container_name: str
+    action_taken: bool = Field(
+        ...,
+        description="True if the container was actually killed, False if skipped",
+    )
+    reason: str = Field(..., description="Why this action was (or was not) taken")
+    timestamp: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat(),
+    )
+
+
+# ── Audit Log Models & Store ─────────────────────────────────────────────────
+
+class AuditLogEntry(BaseModel):
+    """One immutable audit record written by the Remediator."""
+
+    timestamp: str = Field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat(),
+    )
+    container_id: str
+    container_name: str
+    trust_score: float
+    risk_tier: str
+    action: str = Field(
+        ...,
+        description="'autonomous_kill' or 'skipped'",
+    )
+    reason: str
+
+
+# Append-only in-memory audit log (one Python process lifetime).
+# A persistent store (DB / file) is out of scope for this task.
+_audit_log: list[AuditLogEntry] = []
+
+
+def append_audit_entry(entry: AuditLogEntry) -> None:
+    """Append an entry to the in-memory audit log.  Thread-safe for asyncio."""
+    _audit_log.append(entry)
+
+
+def get_audit_log() -> list[AuditLogEntry]:
+    """Return a snapshot of the audit log (newest-first)."""
+    return list(reversed(_audit_log))

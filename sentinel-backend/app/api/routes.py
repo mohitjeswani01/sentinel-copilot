@@ -20,7 +20,8 @@ from fastapi import APIRouter, HTTPException
 
 from app.core.docker_bridge import kill_container
 from app.copilot.investigator import Investigator
-from app.models.schemas import InvestigationResult
+from app.copilot.loop import run_copilot_cycle
+from app.models.schemas import AuditLogEntry, InvestigationResult, get_audit_log
 from app.scanner.background_scanner import get_container_result, get_scan_results
 
 logger = logging.getLogger(__name__)
@@ -115,6 +116,23 @@ async def investigate_container(container_id: str) -> InvestigationResult:
         raise HTTPException(
             status_code=500,
             detail=f"Investigation failed: {exc}",
+        ) from exc
+
+
+@router.post("/containers/{container_id}/run-copilot-cycle", tags=["containers"])
+async def trigger_copilot_cycle(container_id: str) -> dict[str, Any]:
+    """Manually trigger the full copilot cycle for one container on-demand.
+
+    Useful for live demo: runs the Scan → Investigate → Alert → Remediate
+    pipeline for the specified container without waiting for the next
+    background scan to fire automatically.
+    """
+    try:
+        return await run_copilot_cycle(container_id)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Copilot cycle failed: {exc}",
         ) from exc
 
 
@@ -232,31 +250,51 @@ async def governance_terminate(container_id: str) -> dict[str, Any]:
 
 
 @router.get("/governance/audit-logs", tags=["governance"])
-async def governance_audit_logs(limit: int = 20) -> list[dict[str, Any]]:
+async def governance_audit_logs(limit: int = 50) -> list[dict[str, Any]]:
     """Return recent governance audit log entries.
 
-    Currently generated from the last scan cycle results rather than a
-    persistent audit log (that will come with the full audit subsystem).
+    Combines real Remediator audit entries (autonomous kills + skips) with
+    background-scanner pass-through entries so the frontend always has data
+    even when no autonomous actions have fired yet.
     """
-    results = get_scan_results()
-    logs: list[dict[str, Any]] = []
+    real_entries: list[dict[str, Any]] = []
 
-    for cid, res in results.items():
-        logs.append({
-            "id": f"log-{cid[:8]}",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "agent_name": res["container_name"],
-            "action": f"trust_scan → {res['risk_tier']} ({res['trust_score']:.0f})",
+    # Real Remediator audit records (newest-first)
+    for entry in get_audit_log():
+        real_entries.append({
+            "id": f"audit-{entry.container_id[:8]}-{entry.timestamp}",
+            "timestamp": entry.timestamp,
+            "agent_name": entry.container_name,
+            "action": entry.action,
             "status": "success",
-            "details": f"Vectors: id={res['vector_scores'].get('identity', 0):.0f} "
-                       f"cfg={res['vector_scores'].get('configuration', 0):.0f} "
-                       f"net={res['vector_scores'].get('network', 0):.0f} "
-                       f"res={res['vector_scores'].get('resources', 0):.0f}",
-            "tool": "background_scanner",
-            "duration": 50,
+            "details": (
+                f"trust={entry.trust_score:.0f} [{entry.risk_tier}]: {entry.reason}"
+            ),
+            "tool": "remediator",
+            "duration": 0,
         })
 
-    return logs[:limit]
+    # Fall back to scanner pass-through entries when no real audit yet
+    if not real_entries:
+        results = get_scan_results()
+        for cid, res in results.items():
+            real_entries.append({
+                "id": f"log-{cid[:8]}",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "agent_name": res["container_name"],
+                "action": f"trust_scan → {res['risk_tier']} ({res['trust_score']:.0f})",
+                "status": "success",
+                "details": (
+                    f"Vectors: id={res['vector_scores'].get('identity', 0):.0f} "
+                    f"cfg={res['vector_scores'].get('configuration', 0):.0f} "
+                    f"net={res['vector_scores'].get('network', 0):.0f} "
+                    f"res={res['vector_scores'].get('resources', 0):.0f}"
+                ),
+                "tool": "background_scanner",
+                "duration": 50,
+            })
+
+    return real_entries[:limit]
 
 
 @router.get("/metrics/cost", tags=["metrics"])
