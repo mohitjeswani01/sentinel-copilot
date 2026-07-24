@@ -32,6 +32,12 @@ from app.trust_engine.vectors.identity import score_identity
 from app.trust_engine.vectors.network import score_network
 from app.trust_engine.vectors.resources import score_resources
 
+# Imported lazily inside the loop to avoid circular imports at module load time.
+# We import the function directly here because the loop module itself imports
+# background_scanner (for get_container_result), so we must not import at
+# top-level to keep the import graph acyclic.
+_COPILOT_INVESTIGATE_TIERS = {"CRITICAL", "HIGH RISK"}
+
 logger = logging.getLogger(__name__)
 
 # Module-level emitter singleton — initialised on first ``start_scanner()``
@@ -144,6 +150,14 @@ async def _scan_loop() -> None:
                             trust_score=result["trust_score"],
                             vector_scores=result["vector_scores"],
                         )
+                        # Fire copilot cycle as background task for risky containers.
+                        # Import here to avoid circular imports at module level.
+                        if result["risk_tier"] in _COPILOT_INVESTIGATE_TIERS:
+                            from app.copilot.loop import run_copilot_cycle  # noqa: PLC0415
+                            asyncio.get_event_loop().create_task(
+                                run_copilot_cycle(cid),
+                                name=f"copilot-cycle-{cid[:12]}",
+                            )
                 except Exception:
                     logger.exception(
                         "Error scoring container %s — continuing",
