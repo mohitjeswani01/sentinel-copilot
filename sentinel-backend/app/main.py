@@ -19,6 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.observability.otel_setup import setup_opentelemetry
 from app.scanner.background_scanner import start_scanner
+from app.api.routes import router as api_router
 
 # ── Logging ──────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -62,6 +63,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── API routes ───────────────────────────────────────────────────────────────
+app.include_router(api_router, prefix="/api/v1")
 
 
 # ── Health check ─────────────────────────────────────────────────────────────
