@@ -38,6 +38,11 @@ logger = logging.getLogger(__name__)
 _emitter: SentinelMetricsEmitter | None = None
 _scanner_task: asyncio.Task[None] | None = None
 
+# ── In-memory scan results store ─────────────────────────────────────────────
+# Keyed by container_id → latest scan result dict.  Updated each scan cycle.
+# Accessed by the API routes to serve container data without re-scanning.
+_last_scan_results: dict[str, dict[str, Any]] = {}
+
 
 def _score_container(
     container_summary: dict[str, Any],
@@ -125,12 +130,16 @@ async def _scan_loop() -> None:
             containers = list_running_containers()
             logger.info("Scan cycle: %d running container(s) found", len(containers))
 
+            current_ids: set[str] = set()
             for container in containers:
                 try:
                     result = _score_container(container)
                     if result is not None:
+                        cid = result["container_id"]
+                        current_ids.add(cid)
+                        _last_scan_results[cid] = result
                         _emitter.emit_container_trust_metrics(
-                            container_id=result["container_id"],
+                            container_id=cid,
                             container_name=result["container_name"],
                             trust_score=result["trust_score"],
                             vector_scores=result["vector_scores"],
@@ -140,6 +149,11 @@ async def _scan_loop() -> None:
                         "Error scoring container %s — continuing",
                         container.get("name", container.get("id", "?")),
                     )
+
+            # Prune containers that are no longer running
+            stale = set(_last_scan_results.keys()) - current_ids
+            for stale_id in stale:
+                del _last_scan_results[stale_id]
 
         except ConnectionError:
             logger.warning(
@@ -168,3 +182,21 @@ def start_scanner() -> None:
     loop = asyncio.get_event_loop()
     _scanner_task = loop.create_task(_scan_loop())
     logger.info("Background scanner task created")
+
+
+# ── Public accessors for API layer ───────────────────────────────────────────
+
+def get_scan_results() -> dict[str, dict[str, Any]]:
+    """Return the current in-memory scan results for all containers.
+
+    Returns:
+        A dict keyed by ``container_id`` → scan result dict with keys:
+        ``container_id``, ``container_name``, ``trust_score``,
+        ``risk_tier``, ``vector_scores``, ``vector_reasons``.
+    """
+    return dict(_last_scan_results)
+
+
+def get_container_result(container_id: str) -> dict[str, Any] | None:
+    """Return the latest scan result for a specific container, or ``None``."""
+    return _last_scan_results.get(container_id)
