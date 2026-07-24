@@ -5,6 +5,7 @@ At least 2 test cases per vector (healthy-case + risky-case) and
 2 test cases for the scorer aggregation.
 """
 
+import json
 import pytest
 
 from app.trust_engine.vectors.identity import score_identity
@@ -179,6 +180,50 @@ class TestResourcesVector:
         assert "no cpu limit" in reason.lower()
 
 
+from app.trust_engine.vectors.llm_behavior import score_llm_behavior, _extract_llm_stats
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# LLM BEHAVIOR VECTOR
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TestLLMBehaviorVector:
+    """Tests for the LLM behavior vector scorer."""
+
+    def test_extract_llm_stats_returns_none_for_empty(self) -> None:
+        """Empty MCP trace result returns None."""
+        raw = {"content": [{"text": '{"status":"success","data":{"data":{"results":[]}}}'}]}
+        stats = _extract_llm_stats(raw)
+        assert stats is None
+
+    def test_extract_llm_stats_parses_spans(self) -> None:
+        """Parses LLM spans and token counts correctly."""
+        data_json = json.dumps({
+            "status": "success",
+            "data": {
+                "data": {
+                    "results": [
+                        {
+                            "rows": [
+                                {
+                                    "name": "llm.chat.completion",
+                                    "durationNano": 500_000_000,
+                                    "gen_ai.usage.total_tokens": 300,
+                                }
+                            ]
+                        }
+                    ]
+                }
+            }
+        })
+        raw = {"content": [{"text": data_json}]}
+        stats = _extract_llm_stats(raw)
+        assert stats is not None
+        assert stats["span_count"] == 1
+        assert stats["total_tokens"] == 300
+        assert stats["avg_latency_ms"] == 500.0
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # SCORER (weighted aggregation)
 # ═══════════════════════════════════════════════════════════════════════════
@@ -193,6 +238,7 @@ class TestScorer:
             "configuration": 100.0,
             "network": 100.0,
             "resources": 100.0,
+            "llm_behavior": 100.0,
         }
         score, tier = calculate_trust_score(vectors)
         assert score == 100.0
@@ -205,6 +251,7 @@ class TestScorer:
             "configuration": 20.0,
             "network": 20.0,
             "resources": 20.0,
+            "llm_behavior": 20.0,
         }
         score, tier = calculate_trust_score(vectors)
         assert score == 20.0
@@ -213,14 +260,15 @@ class TestScorer:
     def test_mixed_scores_elevated(self) -> None:
         """Mixed scores should produce weighted average in ELEVATED range."""
         vectors = {
-            "identity": 100.0,   # 30% → 30
-            "configuration": 75.0,  # 30% → 22.5
-            "network": 50.0,    # 20% → 10
-            "resources": 65.0,  # 20% → 13
+            "identity": 100.0,      # 25% → 25
+            "configuration": 75.0,     # 25% → 18.75
+            "network": 50.0,       # 15% → 7.5
+            "resources": 65.0,     # 15% → 9.75
+            "llm_behavior": 80.0,  # 20% → 16.0
         }
         score, tier = calculate_trust_score(vectors)
-        # Expected: 30 + 22.5 + 10 + 13 = 75.5
-        assert abs(score - 75.5) < 0.1
+        # Expected: 25 + 18.75 + 7.5 + 9.75 + 16 = 77.0
+        assert abs(score - 77.0) < 0.1
         assert tier == "ELEVATED"
 
     def test_missing_vectors_redistribute(self) -> None:
@@ -230,6 +278,7 @@ class TestScorer:
             "configuration": 100.0,
         }
         score, tier = calculate_trust_score(vectors)
-        # Only identity(30%) + configuration(30%) present → normalised to 100%
+        # Only identity(25%) + configuration(25%) present → normalised to 100%
         assert score == 100.0
         assert tier == "HEALTHY"
+
