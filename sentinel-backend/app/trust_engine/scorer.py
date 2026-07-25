@@ -93,7 +93,9 @@ def calculate_trust_score(
         "Trust Score=%.1f (%s) — vectors: %s",
         trust_score,
         risk_tier,
-        {k: f"{v:.0f}" for k, v in vector_scores.items()},
+        # A vector may legitimately be None (see the skip above) — formatting it
+        # as a float would raise TypeError and take down the whole scan cycle.
+        {k: "n/a" if v is None else f"{v:.0f}" for k, v in vector_scores.items()},
     )
 
     return trust_score, risk_tier
