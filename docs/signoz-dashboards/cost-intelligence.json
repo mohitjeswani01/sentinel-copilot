@@ -1,0 +1,375 @@
+{
+  "createdAt": "2026-07-25T08:58:07.427124Z",
+  "createdBy": "sentinel-dashboards@signozserviceaccount.com",
+  "data": {
+    "description": "Cost- and resource-risk signals grounded ONLY in metrics the Sentinel backend actually emits. There is deliberately no cost-per-day panel: no cost metric is emitted, so none is invented. LLM Behavior stands in for token/latency/cost behaviour and the resources vector stands in for infrastructure cost risk.",
+    "layout": [
+      {
+        "h": 6,
+        "i": "llm-trend",
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      {
+        "h": 6,
+        "i": "llm-by-container",
+        "w": 6,
+        "x": 0,
+        "y": 6
+      },
+      {
+        "h": 3,
+        "i": "llm-fleet-avg",
+        "w": 6,
+        "x": 6,
+        "y": 6
+      },
+      {
+        "h": 3,
+        "i": "res-fleet-avg",
+        "w": 6,
+        "x": 6,
+        "y": 9
+      },
+      {
+        "h": 6,
+        "i": "resource-risk",
+        "w": 12,
+        "x": 0,
+        "y": 12
+      }
+    ],
+    "tags": [
+      "sentinel-copilot",
+      "shadow-ai",
+      "cost",
+      "llm",
+      "resources"
+    ],
+    "title": "Sentinel Copilot — Cost Intelligence",
+    "variables": {},
+    "version": "v5",
+    "widgets": [
+      {
+        "contextLinks": {
+          "linksData": null
+        },
+        "description": "sentinel.container.vector.llm_behavior over time per container. This is the vector most related to token/latency/cost behaviour in the scoring logic. A flat 100 means no LLM telemetry was found for that container.",
+        "fillSpans": false,
+        "id": "llm-trend",
+        "nullZeroValues": "zero",
+        "opacity": "1",
+        "panelTypes": "graph",
+        "query": {
+          "builder": {
+            "queryData": [
+              {
+                "aggregations": [
+                  {
+                    "metricName": "sentinel.container.vector.llm_behavior",
+                    "spaceAggregation": "avg",
+                    "temporality": "Unspecified",
+                    "timeAggregation": "avg"
+                  }
+                ],
+                "dataSource": "metrics",
+                "disabled": false,
+                "expression": "A",
+                "filter": {
+                  "expression": ""
+                },
+                "functions": [],
+                "groupBy": [
+                  {
+                    "dataType": "string",
+                    "key": "container_name",
+                    "type": "tag"
+                  }
+                ],
+                "having": [],
+                "legend": "{{container_name}}",
+                "limit": 100,
+                "orderBy": [
+                  {
+                    "columnName": "__result",
+                    "order": "desc"
+                  }
+                ],
+                "queryName": "A",
+                "selectColumns": [],
+                "stepInterval": 60
+              }
+            ],
+            "queryFormulas": []
+          },
+          "id": "195d103c-e617-4ba4-9201-48316b835422",
+          "queryType": "builder"
+        },
+        "selectedLogFields": [],
+        "selectedTracesFields": [],
+        "softMax": 100,
+        "softMin": 0,
+        "timePreferance": "GLOBAL_TIME",
+        "title": "LLM Behavior Score Trend",
+        "yAxisUnit": "none"
+      },
+      {
+        "columnUnits": {
+          "A": "none"
+        },
+        "contextLinks": {
+          "linksData": null
+        },
+        "description": "Latest llm_behavior score per container. Per the scorer, a container with NO LLM activity returns a neutral 100.0 ('No LLM activity detected — not applicable'). Any value below 100 means real LLM telemetry was found and scored. If every row reads 100, no LLM-instrumented containers have been detected yet in this environment — this is not a cost figure.",
+        "fillSpans": false,
+        "id": "llm-by-container",
+        "nullZeroValues": "zero",
+        "opacity": "1",
+        "panelTypes": "table",
+        "query": {
+          "builder": {
+            "queryData": [
+              {
+                "aggregations": [
+                  {
+                    "metricName": "sentinel.container.vector.llm_behavior",
+                    "reduceTo": "last",
+                    "spaceAggregation": "avg",
+                    "temporality": "Unspecified",
+                    "timeAggregation": "latest"
+                  }
+                ],
+                "dataSource": "metrics",
+                "disabled": false,
+                "expression": "A",
+                "filter": {
+                  "expression": ""
+                },
+                "functions": [],
+                "groupBy": [
+                  {
+                    "dataType": "string",
+                    "key": "container_name",
+                    "type": "tag"
+                  }
+                ],
+                "having": [],
+                "legend": "{{container_name}}",
+                "limit": 100,
+                "orderBy": [
+                  {
+                    "columnName": "__result",
+                    "order": "desc"
+                  }
+                ],
+                "queryName": "A",
+                "reduceTo": "last",
+                "selectColumns": [],
+                "stepInterval": 60
+              }
+            ],
+            "queryFormulas": []
+          },
+          "id": "df9ef7e9-f061-454d-8df6-b6e1e5fd07b0",
+          "queryType": "builder"
+        },
+        "selectedLogFields": [],
+        "selectedTracesFields": [],
+        "softMax": 100,
+        "softMin": 0,
+        "timePreferance": "GLOBAL_TIME",
+        "title": "LLM Behavior by Container — 100 = neutral default (no LLM telemetry found)",
+        "yAxisUnit": "none"
+      },
+      {
+        "contextLinks": {
+          "linksData": null
+        },
+        "description": "Fleet-wide average llm_behavior. Reads 100 while no LLM-instrumented containers are detected.",
+        "fillSpans": false,
+        "id": "llm-fleet-avg",
+        "nullZeroValues": "zero",
+        "opacity": "1",
+        "panelTypes": "value",
+        "query": {
+          "builder": {
+            "queryData": [
+              {
+                "aggregations": [
+                  {
+                    "metricName": "sentinel.container.vector.llm_behavior",
+                    "reduceTo": "avg",
+                    "spaceAggregation": "avg",
+                    "temporality": "Unspecified",
+                    "timeAggregation": "avg"
+                  }
+                ],
+                "dataSource": "metrics",
+                "disabled": false,
+                "expression": "A",
+                "filter": {
+                  "expression": ""
+                },
+                "functions": [],
+                "groupBy": [],
+                "having": [],
+                "legend": "",
+                "limit": 100,
+                "orderBy": [
+                  {
+                    "columnName": "__result",
+                    "order": "desc"
+                  }
+                ],
+                "queryName": "A",
+                "reduceTo": "avg",
+                "selectColumns": [],
+                "stepInterval": 60
+              }
+            ],
+            "queryFormulas": []
+          },
+          "id": "9802ccb8-49e7-412f-853c-854cecf973fd",
+          "queryType": "builder"
+        },
+        "selectedLogFields": [],
+        "selectedTracesFields": [],
+        "softMax": 100,
+        "softMin": 0,
+        "timePreferance": "GLOBAL_TIME",
+        "title": "Fleet Avg LLM Behavior Score",
+        "yAxisUnit": "none"
+      },
+      {
+        "contextLinks": {
+          "linksData": null
+        },
+        "description": "Fleet-wide average of the resources vector — the closest real proxy available for infrastructure cost risk (CPU/memory limits and usage).",
+        "fillSpans": false,
+        "id": "res-fleet-avg",
+        "nullZeroValues": "zero",
+        "opacity": "1",
+        "panelTypes": "value",
+        "query": {
+          "builder": {
+            "queryData": [
+              {
+                "aggregations": [
+                  {
+                    "metricName": "sentinel.container.vector.resources",
+                    "reduceTo": "avg",
+                    "spaceAggregation": "avg",
+                    "temporality": "Unspecified",
+                    "timeAggregation": "avg"
+                  }
+                ],
+                "dataSource": "metrics",
+                "disabled": false,
+                "expression": "A",
+                "filter": {
+                  "expression": ""
+                },
+                "functions": [],
+                "groupBy": [],
+                "having": [],
+                "legend": "",
+                "limit": 100,
+                "orderBy": [
+                  {
+                    "columnName": "__result",
+                    "order": "desc"
+                  }
+                ],
+                "queryName": "A",
+                "reduceTo": "avg",
+                "selectColumns": [],
+                "stepInterval": 60
+              }
+            ],
+            "queryFormulas": []
+          },
+          "id": "1c04f2d6-4618-409f-985f-b7cf55a2cf96",
+          "queryType": "builder"
+        },
+        "selectedLogFields": [],
+        "selectedTracesFields": [],
+        "softMax": 100,
+        "softMin": 0,
+        "timePreferance": "GLOBAL_TIME",
+        "title": "Fleet Avg Resource Score",
+        "yAxisUnit": "none"
+      },
+      {
+        "contextLinks": {
+          "linksData": null
+        },
+        "description": "sentinel.container.vector.resources per container. Lower scores mean missing CPU/memory limits or heavy usage — the closest real proxy to infrastructure cost risk currently emitted. No fabricated per-day cost figures are shown.",
+        "fillSpans": false,
+        "id": "resource-risk",
+        "nullZeroValues": "zero",
+        "opacity": "1",
+        "panelTypes": "graph",
+        "query": {
+          "builder": {
+            "queryData": [
+              {
+                "aggregations": [
+                  {
+                    "metricName": "sentinel.container.vector.resources",
+                    "spaceAggregation": "avg",
+                    "temporality": "Unspecified",
+                    "timeAggregation": "avg"
+                  }
+                ],
+                "dataSource": "metrics",
+                "disabled": false,
+                "expression": "A",
+                "filter": {
+                  "expression": ""
+                },
+                "functions": [],
+                "groupBy": [
+                  {
+                    "dataType": "string",
+                    "key": "container_name",
+                    "type": "tag"
+                  }
+                ],
+                "having": [],
+                "legend": "{{container_name}}",
+                "limit": 100,
+                "orderBy": [
+                  {
+                    "columnName": "__result",
+                    "order": "desc"
+                  }
+                ],
+                "queryName": "A",
+                "selectColumns": [],
+                "stepInterval": 60
+              }
+            ],
+            "queryFormulas": []
+          },
+          "id": "c13ebc3b-55de-429e-85ce-e4d34768ed9e",
+          "queryType": "builder"
+        },
+        "selectedLogFields": [],
+        "selectedTracesFields": [],
+        "softMax": 100,
+        "softMin": 0,
+        "timePreferance": "GLOBAL_TIME",
+        "title": "Resource Risk Overview",
+        "yAxisUnit": "none"
+      }
+    ]
+  },
+  "id": "019f987e-fec3-721c-bcfc-859274298860",
+  "locked": false,
+  "org_id": "019f9868-4562-7da3-9737-0910cb48d40c",
+  "source": "user",
+  "updatedAt": "2026-07-25T08:58:07.427124Z",
+  "updatedBy": "sentinel-dashboards@signozserviceaccount.com",
+  "webUrl": "http://signoz-signoz-0:8080/dashboard/019f987e-fec3-721c-bcfc-859274298860"
+}

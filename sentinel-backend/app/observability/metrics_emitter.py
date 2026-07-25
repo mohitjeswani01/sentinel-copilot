@@ -84,6 +84,7 @@ class SentinelMetricsEmitter:
         container_name: str,
         trust_score: float,
         vector_scores: dict[str, float],
+        risk_tier: str = "",
     ) -> None:
         """Record trust metrics for a container.
 
@@ -97,12 +98,18 @@ class SentinelMetricsEmitter:
             vector_scores: Mapping of vector names to their scores
                 (``identity``, ``configuration``, ``network``,
                 ``resources``, ``llm_behavior``).  Values 0–100.
+            risk_tier: Risk classification from the scorer (``CRITICAL``,
+                ``HIGH RISK``, ``ELEVATED``, ``HEALTHY``).  Emitted as a
+                metric attribute so SigNoz dashboards can group / count
+                containers by tier without re-deriving it from the score.
         """
         attrs: dict[str, str] = {
             "container_id": container_id,
             "container_name": container_name,
             "environment": settings.ENVIRONMENT,
         }
+        if risk_tier:
+            attrs["risk_tier"] = risk_tier
 
         metric_map: dict[str, tuple[float, dict[str, str]]] = {
             "sentinel.container.trust_score": (
