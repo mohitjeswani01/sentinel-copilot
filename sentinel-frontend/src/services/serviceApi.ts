@@ -1,6 +1,9 @@
 import axios from "axios";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000/api/v1";
+// The Sentinel backend listens on :8001 (see sentinel-backend/.env.example).
+// Port 8000 is the SigNoz MCP server, not this API — pointing here at 8000
+// silently yields empty dashboards.
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8001/api/v1";
 
 // ─── INTERFACES ───────────────────────────────────────────────
 
@@ -79,11 +82,52 @@ export interface ExecutiveMetrics {
   moneySaved: number;
   costReduction: number;
   alertsActive: number;
-  policiesEnforced: number;
+  /** Empty: the backend exposes no historical time series for cost vs risk. */
   costVsRiskTrend: { month: string; cost: number; risk: number }[];
-  kpiDeltas: { label: string; value: string; delta: number; trend: "up" | "down" }[];
+  /**
+   * `delta`/`trend` are optional because the backend exposes only point-in-time
+   * values — there is no previous-period baseline to compare against. Consumers
+   * must not render a change indicator when they are absent.
+   */
+  kpiDeltas: { label: string; value: string; delta?: number; trend?: "up" | "down" }[];
   averageTrustScore?: number;
 }
+
+/** One container's LLM Behavior vector reading (Issue #7). */
+export interface LlmBehaviorContainer {
+  containerId: string;
+  containerName: string;
+  score: number;
+  reason: string;
+  /**
+   * True only when the scorer actually found LLM telemetry. The vector returns a
+   * neutral 100 ("No LLM activity detected — not applicable") when it finds
+   * none, so 100 means "not measured", NOT "perfect behaviour".
+   */
+  hasTelemetry: boolean;
+}
+
+export interface LlmBehaviorSummary {
+  containers: LlmBehaviorContainer[];
+  /** Average across all scanned containers. */
+  fleetAverage: number;
+  /** How many containers had real LLM telemetry scored. */
+  withTelemetry: number;
+  total: number;
+}
+
+/** Raw container record as returned by GET /containers. */
+export interface Container_Record {
+  container_id: string;
+  container_name: string;
+  trust_score: number;
+  risk_tier: string;
+  vector_scores: Record<string, number>;
+  vector_reasons?: Record<string, string>;
+}
+
+/** The neutral value the llm_behavior vector reports when no telemetry exists. */
+export const LLM_NEUTRAL_SCORE = 100;
 
 // ─── SERVICE API (100% Real Backend Integration) ───────────────────────
 
@@ -127,36 +171,28 @@ export async function getExecutiveMetrics(): Promise<ExecutiveMetrics> {
       moneySaved: data.money_saved,
       costReduction: costReduction,
       alertsActive: alertsCount,
-      policiesEnforced: 142 + data.total_containers,
-      costVsRiskTrend: [
-        { month: "Jan", cost: 12000, risk: 45 },
-        { month: "Feb", cost: 11500, risk: 38 },
-        { month: "Mar", cost: 10800, risk: 28 },
-      ],
+      // No historical series exists in the API, so none is invented here. The
+      // dashboard renders an explicit empty state instead of a fake trend.
+      costVsRiskTrend: [],
+      // Every KPI below is a real value read back from the API this request.
+      // No deltas are set: the backend exposes only current values, with no
+      // previous-period baseline to compare against.
       kpiDeltas: [
         {
-          label: "Active Agents",
+          label: "Containers Scanned",
           value: data.total_containers.toString(),
-          delta: 2,
-          trend: "up",
         },
         {
-          label: "Cost/Day",
-          value: `$${(data.total_containers * 300).toFixed(0)}`,
-          delta: 18,
-          trend: "down",
+          label: "Avg Trust Score",
+          value: data.average_trust_score.toFixed(1),
         },
         {
-          label: "Policies Enforced",
-          value: (142 + data.total_containers).toString(),
-          delta: 12,
-          trend: "up",
-        },
-        {
-          label: "Threats Blocked",
+          label: "Critical Risks",
           value: data.critical_risks.toString(),
-          delta: 34,
-          trend: "up",
+        },
+        {
+          label: "Active Alerts",
+          value: alertsCount.toString(),
         },
       ],
       averageTrustScore: data.average_trust_score,
@@ -173,11 +209,10 @@ export async function getExecutiveMetrics(): Promise<ExecutiveMetrics> {
 export async function getDiscovery(): Promise<{ servers: MCP_Server[]; agents: AI_Agent[] }> {
   try {
     const response = await axios.get(
-      "http://localhost:8000/api/v1/discovery/shadow-ai",
+      `${API_URL}/discovery/shadow-ai`,
       axiousConfig
     );
     const containers = response.data || [];
-    console.log("RAW DOCKER DATA:", containers);
 
     const serverContainers = containers.filter((c: any) => c.type === "mcp_server" || !c.type);
     const agentContainers = containers.filter((c: any) => c.type === "ai_agent");
@@ -217,7 +252,8 @@ export async function getDiscovery(): Promise<{ servers: MCP_Server[]; agents: A
       riskLevel: c.trust_score < 40 ? "critical" : c.trust_score < 60 ? "high" : c.trust_score < 80 ? "medium" : "low",
       lastSeen: new Date().toISOString(),
       totalCalls: 0,
-      costPerDay: 300,
+      // The backend emits no per-container cost metric, so no figure is invented.
+      costPerDay: 0,
       mcpServerId: c.id,
       capabilities: c.is_sanctioned ? ["trusted-operations"] : ["limited-operations"],
     }));
@@ -230,45 +266,24 @@ export async function getDiscovery(): Promise<{ servers: MCP_Server[]; agents: A
 }
 
 /**
- * Get Security Alerts - Real alerts from backend
- * BRIDGE: Hard-Wired for Demo Safety
+ * Get Security Alerts — real alerts derived from scan results by the backend.
+ *
+ * Returns exactly what the API reports, including an empty list. A previous
+ * version substituted a hardcoded "Unauthorized Container Detected" alert
+ * whenever the backend returned nothing, which displayed a fabricated breach as
+ * a genuine detection. An empty list is the honest signal that no container is
+ * currently in the CRITICAL or HIGH RISK tier.
  */
 export async function getSecurityAlerts(): Promise<Security_Alert[]> {
   try {
     const response = await axios.get(
-      "http://localhost:8000/api/v1/security/alerts",
+      `${API_URL}/security/alerts`,
       axiousConfig
     );
-
-    // Hard-Wire: Safety Net for the demo
-    const safetyNet: Security_Alert[] = [{
-      id: 'emergency_1',
-      severity: 'critical',
-      message: 'Unauthorized Container Detected',
-      agentId: 'shadow-agent-1',
-      agentName: 'Shadow-Agent',
-      timestamp: new Date().toISOString(),
-      status: 'active',
-      description: 'An unauthorized container was detected on the network.'
-    }];
-
-    return response.data && response.data.length > 0
-      ? response.data
-      : safetyNet;
-
+    return response.data ?? [];
   } catch (error) {
     console.error("Failed to fetch security alerts", error);
-    // Return safety net on error too
-    return [{
-      id: 'emergency_1',
-      severity: 'critical',
-      message: 'Unauthorized Container Detected',
-      agentId: 'shadow-agent-1',
-      agentName: 'Shadow-Agent',
-      timestamp: new Date().toISOString(),
-      status: 'active',
-      description: 'An unauthorized container was detected on the network.'
-    }];
+    return [];
   }
 }
 
@@ -400,15 +415,19 @@ export async function getAuditLog(limit: number = 20): Promise<Audit_Log_Event[]
       `${API_URL}/governance/audit-logs?limit=${limit}`,
       axiousConfig
     );
-    return response.data.map((log: any) => ({
+    // Map the backend's snake_case audit records onto Audit_Log_Event. The
+    // previous mapping invented ipAddress/user fields that are not in the
+    // interface and dropped agentId/tool/duration that the backend does send.
+    return response.data.map((log: any): Audit_Log_Event => ({
       id: log.id,
       timestamp: log.timestamp,
+      agentId: log.container_id ?? "",
       agentName: log.agent_name,
       action: log.action,
+      tool: log.tool ?? "",
       status: log.status,
       details: log.details,
-      ipAddress: "127.0.0.1",
-      user: "System",
+      duration: log.duration ?? 0,
     }));
   } catch (error) {
     console.error("Failed to fetch audit logs", error);
@@ -444,6 +463,61 @@ export async function getSystemHealth() {
 }
 
 /**
+ * Get all scanned containers with their full trust-vector breakdown.
+ * Backed by GET /containers — the scanner's in-memory store.
+ */
+export async function getContainers(): Promise<Container_Record[]> {
+  try {
+    const response = await axios.get(`${API_URL}/containers`, axiousConfig);
+    return response.data ?? [];
+  } catch (error) {
+    console.error("Failed to fetch containers", error);
+    return [];
+  }
+}
+
+/**
+ * Get the LLM Behavior vector for every scanned container (Issue #7).
+ *
+ * Reads `vector_scores.llm_behavior` and the matching `vector_reasons` entry
+ * from GET /containers. Note the vector returns a neutral 100 when it finds no
+ * LLM telemetry, so `hasTelemetry` — not the score — is what tells you whether
+ * anything was actually measured.
+ */
+export async function getLlmBehavior(): Promise<LlmBehaviorSummary> {
+  const records = await getContainers();
+
+  const containers: LlmBehaviorContainer[] = records
+    .map((r) => {
+      const score = r.vector_scores?.llm_behavior;
+      return {
+        containerId: r.container_id,
+        containerName: r.container_name,
+        score: typeof score === "number" ? score : LLM_NEUTRAL_SCORE,
+        reason: r.vector_reasons?.llm_behavior ?? "",
+        hasTelemetry: typeof score === "number" && score !== LLM_NEUTRAL_SCORE,
+      };
+    })
+    // Show the containers whose behaviour was actually scored first, then the
+    // lowest scores, so anything interesting surfaces at the top.
+    .sort((a, b) =>
+      Number(b.hasTelemetry) - Number(a.hasTelemetry) || a.score - b.score
+    );
+
+  const total = containers.length;
+  const fleetAverage = total
+    ? containers.reduce((sum, c) => sum + c.score, 0) / total
+    : 0;
+
+  return {
+    containers,
+    fleetAverage: Math.round(fleetAverage * 10) / 10,
+    withTelemetry: containers.filter((c) => c.hasTelemetry).length,
+    total,
+  };
+}
+
+/**
  * Get Active Agents
  */
 export async function getActiveAgents(): Promise<AI_Agent[]> {
@@ -467,7 +541,6 @@ function getZeroMetrics(): ExecutiveMetrics {
     moneySaved: 0,
     costReduction: 0,
     alertsActive: 0,
-    policiesEnforced: 0,
     costVsRiskTrend: [],
     kpiDeltas: [],
     averageTrustScore: 0,
@@ -475,6 +548,10 @@ function getZeroMetrics(): ExecutiveMetrics {
 }
 
 // ─── AUTH (Mock SSO) ───────────────────────────────────────────────
+//
+// The only intentionally mocked area left in this file: the backend exposes no
+// authentication routes, so there is nothing real to call yet. Everything above
+// this line reads from the FastAPI API.
 
 export async function loginWithSSO(): Promise<{
   token: string;

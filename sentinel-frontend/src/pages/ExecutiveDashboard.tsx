@@ -73,7 +73,6 @@ export default function ExecutiveDashboard() {
           <div className="flex items-center gap-2 mb-3">
               <p className="text-xs text-muted-foreground uppercase tracking-wider">Threat Level</p>
               <RiskTooltip />
-              <DemoDataBadge className="ml-1" />
           </div>
           <div className={`text-4xl font-black uppercase tracking-wide ${threatColor} ${data.threatLevel === "critical" ? "threat-pulse" : ""}`}>
             {data.threatLevel}
@@ -88,12 +87,13 @@ export default function ExecutiveDashboard() {
       {/* Bento Grid — KPI cards */}
       <motion.div variants={item} className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {data.kpiDeltas.map((kpi, i) => {
-          const icons = [Bot, DollarSign, Shield, ShieldAlert];
+          const icons = [Bot, Shield, ShieldAlert, ShieldAlert];
           const Icon = icons[i] || Bot;
-          const isPositive = kpi.trend === "up" ? kpi.delta > 0 : kpi.delta < 0;
-          // Electric cyan for growth, signal red for threats
-          const isGrowth = kpi.label === "Policies Enforced" || kpi.label === "Threats Blocked";
-          const valueColor = isGrowth ? "text-cyber" : "";
+          const valueColor = kpi.label === "Avg Trust Score" ? "text-cyber" : "";
+          // The API exposes only current values, so a change indicator is shown
+          // only when a real delta is present — never a placeholder percentage.
+          const hasDelta = typeof kpi.delta === "number";
+          const isPositive = kpi.trend === "up" ? kpi.delta! > 0 : kpi.delta! < 0;
           return (
             <div key={kpi.label} className="glass-panel glow-border rounded-xl p-4 card-hover">
               <div className="flex items-center justify-between mb-3">
@@ -101,18 +101,36 @@ export default function ExecutiveDashboard() {
                 <Icon className="h-4 w-4 text-muted-foreground" />
               </div>
               <div className={`text-2xl font-bold ${valueColor}`}>{kpi.value}</div>
-              <div className={`flex items-center gap-1 mt-1 text-xs ${isPositive ? "text-success-val" : "text-threat"}`}>
-                {kpi.delta > 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
-                <span>{Math.abs(kpi.delta)}% from last period</span>
-              </div>
+              {hasDelta ? (
+                <div className={`flex items-center gap-1 mt-1 text-xs ${isPositive ? "text-success-val" : "text-threat"}`}>
+                  {kpi.delta! > 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
+                  <span>{Math.abs(kpi.delta!)}% from last period</span>
+                </div>
+              ) : (
+                <div className="mt-1 text-xs text-muted-foreground">current value</div>
+              )}
             </div>
           );
         })}
       </motion.div>
 
-      {/* Bento Grid — Cost vs Risk Chart */}
+      {/* Bento Grid — Cost vs Risk Chart.
+          The API exposes only point-in-time metrics, so when no historical
+          series is available this renders an explicit empty state rather than a
+          hardcoded trend line. */}
       <motion.div variants={item} className="glass-panel glow-border rounded-xl p-6 card-hover">
         <p className="text-xs text-muted-foreground uppercase tracking-wider mb-4">Cost vs Risk Trend</p>
+        {data.costVsRiskTrend.length === 0 ? (
+          <div className="h-[240px] flex flex-col items-center justify-center text-center gap-2">
+            <p className="text-sm text-muted-foreground">No historical trend data available</p>
+            <p className="text-xs text-muted-foreground max-w-md">
+              The Sentinel API reports current values only. Historical trends are
+              available in the SigNoz dashboards, which retain the
+              <span className="font-mono"> sentinel.container.* </span>
+              time series.
+            </p>
+          </div>
+        ) : (
         <ResponsiveContainer width="100%" height={240}>
           <AreaChart data={data.costVsRiskTrend}>
             <defs>
@@ -137,6 +155,7 @@ export default function ExecutiveDashboard() {
             <Line type="monotone" dataKey="risk" stroke="hsl(0 72% 51%)" strokeWidth={2} dot={false} />
           </AreaChart>
         </ResponsiveContainer>
+        )}
       </motion.div>
     </motion.div>
   );

@@ -85,7 +85,7 @@ function DiscoveryDashboardContent() {
         <div className="text-2xl font-bold tracking-tight">Discovery & Governance</div>
         <div className="glass-panel glow-border rounded-xl p-6 text-center">
           <p className="text-destructive font-semibold mb-2">Failed to load discovery data</p>
-          <p className="text-muted-foreground text-sm mb-4">Make sure your backend is running on http://localhost:8000</p>
+          <p className="text-muted-foreground text-sm mb-4">Make sure your backend is running on http://localhost:8001</p>
           <Button onClick={() => window.location.reload()}>Retry</Button>
         </div>
       </div>
