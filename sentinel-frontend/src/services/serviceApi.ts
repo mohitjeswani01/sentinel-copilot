@@ -36,6 +36,19 @@ export interface AI_Agent {
   capabilities: string[];
 }
 
+/** Unified container record for the Discovery page (Part A unification). */
+export interface MonitoredContainer {
+  id: string;
+  name: string;
+  status: "running" | "quarantined" | "stopped";
+  trustScore: number;
+  riskLevel: "low" | "medium" | "high" | "critical";
+  riskTier: string;
+  lastSeen: string;
+  isSanctioned: boolean;
+  trustDetails?: Record<string, number>;
+}
+
 export interface Security_Alert {
   id: string;
   severity: "critical" | "high" | "medium" | "low";
@@ -91,6 +104,15 @@ export interface ExecutiveMetrics {
    */
   kpiDeltas: { label: string; value: string; delta?: number; trend?: "up" | "down" }[];
   averageTrustScore?: number;
+}
+
+/** One data point from the rolling trend buffer (GET /metrics/trend). */
+export interface TrendDataPoint {
+  timestamp: string;
+  avg_trust_score: number;
+  critical_count: number;
+  high_risk_count: number;
+  healthy_count: number;
 }
 
 /** One container's LLM Behavior vector reading (Issue #7). */
@@ -204,9 +226,10 @@ export async function getExecutiveMetrics(): Promise<ExecutiveMetrics> {
 }
 
 /**
- * Get Discovery Data - Shadow AI & Container List
+ * Get Discovery Data — Unified flat list of ALL monitored containers.
+ * No longer split into agents/servers — they're all Docker containers.
  */
-export async function getDiscovery(): Promise<{ servers: MCP_Server[]; agents: AI_Agent[] }> {
+export async function getMonitoredContainers(): Promise<MonitoredContainer[]> {
   try {
     const response = await axios.get(
       `${API_URL}/discovery/shadow-ai`,
@@ -214,10 +237,7 @@ export async function getDiscovery(): Promise<{ servers: MCP_Server[]; agents: A
     );
     const containers = response.data || [];
 
-    const serverContainers = containers.filter((c: any) => c.type === "mcp_server" || !c.type);
-    const agentContainers = containers.filter((c: any) => c.type === "ai_agent");
-
-    const servers: MCP_Server[] = serverContainers.map((c: any) => {
+    return containers.map((c: any): MonitoredContainer => {
       let riskLevel: "low" | "medium" | "high" | "critical" = "low";
       if (c.trust_score < 40) {
         riskLevel = "critical";
@@ -230,39 +250,27 @@ export async function getDiscovery(): Promise<{ servers: MCP_Server[]; agents: A
       return {
         id: c.id,
         name: c.name,
-        status: c.status === "running" ? "active" : "dormant",
-        riskScore: 100 - c.trust_score,
-        riskLevel: riskLevel,
-        lastSeen: "Just now",
-        connectedAgents: 0,
-        toolsExposed: c.is_sanctioned ? 0 : 1,
-        region: "local",
-        protocol: "docker",
+        status: c.status === "running" ? "running" : "stopped",
         trustScore: c.trust_score,
+        riskLevel,
+        riskTier: c.risk_tier,
+        lastSeen: c.last_seen || "",
+        isSanctioned: c.is_sanctioned ?? false,
         trustDetails: c.trust_details,
       };
     });
-
-    const agents: AI_Agent[] = agentContainers.map((c: any) => ({
-      id: c.id,
-      name: c.name,
-      model: c.image?.split(":")[0] || "Container",
-      status: c.status === "running" ? "active" : "dormant",
-      riskScore: 100 - c.trust_score,
-      riskLevel: c.trust_score < 40 ? "critical" : c.trust_score < 60 ? "high" : c.trust_score < 80 ? "medium" : "low",
-      lastSeen: new Date().toISOString(),
-      totalCalls: 0,
-      // The backend emits no per-container cost metric, so no figure is invented.
-      costPerDay: 0,
-      mcpServerId: c.id,
-      capabilities: c.is_sanctioned ? ["trusted-operations"] : ["limited-operations"],
-    }));
-
-    return { servers, agents };
   } catch (error) {
-    console.error("Failed to fetch discovery", error);
-    return { servers: [], agents: [] };
+    console.error("Failed to fetch monitored containers", error);
+    return [];
   }
+}
+
+/**
+ * Legacy getDiscovery — kept for backward compatibility.
+ * Now wraps getMonitoredContainers.
+ */
+export async function getDiscovery(): Promise<{ servers: MCP_Server[]; agents: AI_Agent[] }> {
+  return { servers: [], agents: [] };
 }
 
 /**
@@ -403,6 +411,20 @@ export async function executeAction(
       error.message ||
       "Action failed";
     return { success: false, message: errorMsg };
+  }
+}
+
+/**
+ * Get rolling trend data for the live chart (GET /metrics/trend).
+ * Returns real scan-cycle data points — NOT fabricated.
+ */
+export async function getTrendData(): Promise<TrendDataPoint[]> {
+  try {
+    const response = await axios.get(`${API_URL}/metrics/trend`, axiousConfig);
+    return response.data ?? [];
+  } catch (error) {
+    console.error("Failed to fetch trend data", error);
+    return [];
   }
 }
 

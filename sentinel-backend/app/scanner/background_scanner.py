@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import deque
+from datetime import datetime, timezone
 from typing import Any
 
 from app.core.config import settings
@@ -50,6 +52,9 @@ _scanner_task: asyncio.Task[None] | None = None
 # Keyed by container_id → latest scan result dict.  Updated each scan cycle.
 # Accessed by the API routes to serve container data without re-scanning.
 _last_scan_results: dict[str, dict[str, Any]] = {}
+
+# ── Rolling trend buffer (last ~60 data points ≈ 10 min at 10s interval) ─────
+_trend_buffer: deque[dict[str, Any]] = deque(maxlen=60)
 
 
 async def _score_container(
@@ -169,6 +174,8 @@ async def _scan_loop() -> None:
                         if result is not None:
                             cid = result["container_id"]
                             current_ids.add(cid)
+                            # Stamp each result with the scan timestamp
+                            result["last_seen"] = datetime.now(timezone.utc).isoformat()
                             _last_scan_results[cid] = result
                             _emitter.emit_container_trust_metrics(
                                 container_id=cid,
@@ -201,6 +208,18 @@ async def _scan_loop() -> None:
             stale = set(_last_scan_results.keys()) - current_ids
             for stale_id in stale:
                 del _last_scan_results[stale_id]
+
+            # ── Append trend data point ──────────────────────────────────
+            if _last_scan_results:
+                all_results = list(_last_scan_results.values())
+                scores = [r["trust_score"] for r in all_results]
+                _trend_buffer.append({
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "avg_trust_score": round(sum(scores) / len(scores), 1),
+                    "critical_count": sum(1 for r in all_results if r["risk_tier"] == "CRITICAL"),
+                    "high_risk_count": sum(1 for r in all_results if r["risk_tier"] == "HIGH RISK"),
+                    "healthy_count": sum(1 for r in all_results if r["risk_tier"] == "HEALTHY"),
+                })
 
         except ConnectionError:
             logger.warning(
@@ -247,3 +266,12 @@ def get_scan_results() -> dict[str, dict[str, Any]]:
 def get_container_result(container_id: str) -> dict[str, Any] | None:
     """Return the latest scan result for a specific container, or ``None``."""
     return _last_scan_results.get(container_id)
+
+
+def get_trend_buffer() -> list[dict[str, Any]]:
+    """Return the rolling trend buffer as a plain list.
+
+    Each entry: ``timestamp``, ``avg_trust_score``, ``critical_count``,
+    ``high_risk_count``, ``healthy_count``.
+    """
+    return list(_trend_buffer)

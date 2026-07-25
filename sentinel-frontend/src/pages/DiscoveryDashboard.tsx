@@ -1,17 +1,13 @@
 import { useState } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
-import { getDiscovery, executeAction, type MCP_Server, type AI_Agent } from "@/services/serviceApi";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { getMonitoredContainers, executeAction, type MonitoredContainer } from "@/services/serviceApi";
 import { motion } from "framer-motion";
-import { Search, Eye, Zap, ShieldOff } from "lucide-react";
+import { Search, Eye, Zap, ShieldOff, Container } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
-import { AgentInspectDialog, RiskTooltip } from "@/components/discovery/AgentInspectDialog";
-import { ServerInspectDialog } from "@/components/discovery/ServerInspectDialog";
-import { KillSwitchDialog } from "@/components/discovery/KillSwitchDialog";
 import { ServerActionDialog } from "@/components/discovery/ServerActionDialog";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 
@@ -23,16 +19,34 @@ const riskColors: Record<string, string> = {
 };
 
 const statusColors: Record<string, string> = {
-  active: "bg-success/10 text-success-val",
-  dormant: "bg-secondary text-muted-foreground",
-  rogue: "bg-threat\/10 text-threat",
+  running: "bg-success/10 text-success-val",
+  quarantined: "bg-signal\/10 text-signal",
+  stopped: "bg-secondary text-muted-foreground",
 };
 
-const container = { hidden: {}, show: { transition: { staggerChildren: 0.05 } } };
+const containerAnim = { hidden: {}, show: { transition: { staggerChildren: 0.05 } } };
 const item = { hidden: { opacity: 0, y: 8 }, show: { opacity: 1, y: 0 } };
 
 function formatTimestamp(ts: string) {
-  return new Date(ts).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  if (!ts) return "—";
+  try {
+    const d = new Date(ts);
+    if (isNaN(d.getTime())) return "—";
+    return d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  } catch {
+    return "—";
+  }
+}
+
+function RiskTooltip() {
+  return (
+    <span
+      className="inline-flex items-center justify-center h-4 w-4 rounded-full bg-muted text-[10px] text-muted-foreground cursor-help"
+      title="Risk = 100 − Trust Score. Lower trust → higher risk."
+    >
+      ?
+    </span>
+  );
 }
 
 export default function DiscoveryDashboard() {
@@ -45,27 +59,56 @@ export default function DiscoveryDashboard() {
 
 function DiscoveryDashboardContent() {
   const [search, setSearch] = useState("");
-  const [inspectAgent, setInspectAgent] = useState<AI_Agent | null>(null);
-  const [inspectServer, setInspectServer] = useState<MCP_Server | null>(null);
-  const [killTarget, setKillTarget] = useState<AI_Agent | null>(null);
-  const [serverActionTarget, setServerActionTarget] = useState<{ server: MCP_Server; action: "quarantine" | "kill" } | null>(null);
+  const [actionTarget, setActionTarget] = useState<{ container: MonitoredContainer; action: "quarantine" | "kill" } | null>(null);
+  const queryClient = useQueryClient();
 
-  const { data, isLoading, error } = useQuery({ queryKey: ["discovery"], queryFn: getDiscovery });
+  const { data: containers, isLoading, error } = useQuery({
+    queryKey: ["monitored-containers"],
+    queryFn: getMonitoredContainers,
+    refetchInterval: 10_000, // Poll every 10 seconds
+  });
 
   const killMutation = useMutation({
-    mutationFn: ({ agentId }: { agentId: string }) => executeAction("kill", agentId),
-    onSuccess: (res) => {
-      toast.error(res.message, { description: "Kill switch executed" });
-      setKillTarget(null);
+    mutationFn: ({ containerId }: { containerId: string }) => executeAction("kill", containerId),
+    onSuccess: (res, vars) => {
+      if (res.success) {
+        // Optimistic update: remove the killed row immediately
+        queryClient.setQueryData<MonitoredContainer[]>(["monitored-containers"], (old) =>
+          old ? old.filter((c) => c.id !== vars.containerId) : []
+        );
+        toast.error(res.message, { description: "Container removed permanently" });
+      } else {
+        toast.warning(res.message);
+      }
+      setActionTarget(null);
+    },
+    onError: (err: any) => {
+      toast.warning(err.message || "Kill failed");
+      setActionTarget(null);
     },
   });
 
-  const serverActionMutation = useMutation({
-    mutationFn: ({ actionType, serverId }: { actionType: string; serverId: string }) => executeAction(actionType, serverId),
+  const quarantineMutation = useMutation({
+    mutationFn: ({ containerId }: { containerId: string }) => executeAction("quarantine", containerId),
     onSuccess: (res, vars) => {
-      const toastFn = vars.actionType === "kill" ? toast.error : toast.warning;
-      toastFn(res.message, { description: `Server ${vars.actionType} executed` });
-      setServerActionTarget(null);
+      if (res.success) {
+        // Optimistic update: mark the container as quarantined
+        queryClient.setQueryData<MonitoredContainer[]>(["monitored-containers"], (old) =>
+          old
+            ? old.map((c) =>
+                c.id === vars.containerId ? { ...c, status: "quarantined" as const } : c
+              )
+            : []
+        );
+        toast.warning(res.message, { description: "Container quarantined (stopped)" });
+      } else {
+        toast.warning(res.message);
+      }
+      setActionTarget(null);
+    },
+    onError: (err: any) => {
+      toast.warning(err.message || "Quarantine failed");
+      setActionTarget(null);
     },
   });
 
@@ -92,150 +135,126 @@ function DiscoveryDashboardContent() {
     );
   }
 
-  const safeData = data || { servers: [], agents: [] };
-  const filteredAgents = (safeData.agents || []).filter((a) => a.name.toLowerCase().includes(search.toLowerCase()) || a.id.includes(search));
-  const filteredServers = (safeData.servers || []).filter((s) => s.name.toLowerCase().includes(search.toLowerCase()) || s.id.includes(search));
+  const safeContainers = containers || [];
+  const filtered = safeContainers.filter(
+    (c) => c.name.toLowerCase().includes(search.toLowerCase()) || c.id.includes(search)
+  );
 
   return (
-    <motion.div variants={container} initial="hidden" animate="show" className="space-y-6">
+    <motion.div variants={containerAnim} initial="hidden" animate="show" className="space-y-6">
       <motion.div variants={item}>
         <h1 className="text-2xl font-bold tracking-tight">Discovery & Governance</h1>
-        <p className="text-muted-foreground text-sm mt-1">Operational visibility into all AI infrastructure</p>
+        <p className="text-muted-foreground text-sm mt-1">Operational visibility into all monitored Docker containers</p>
       </motion.div>
 
-      <motion.div variants={item} className="relative max-w-sm">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <Input placeholder="Search agents or servers..." className="pl-9 bg-secondary border-border" value={search} onChange={(e) => setSearch(e.target.value)} />
+      <motion.div variants={item} className="flex items-center gap-4">
+        <div className="relative max-w-sm flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input placeholder="Search containers..." className="pl-9 bg-secondary border-border" value={search} onChange={(e) => setSearch(e.target.value)} />
+        </div>
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Container className="h-4 w-4" />
+          <span>{safeContainers.length} containers monitored</span>
+        </div>
       </motion.div>
 
-      <Tabs defaultValue="agents">
-        <TabsList className="bg-secondary">
-          <TabsTrigger value="agents">AI Agents ({(safeData.agents || []).length})</TabsTrigger>
-          <TabsTrigger value="servers">MCP Servers ({(safeData.servers || []).length})</TabsTrigger>
-        </TabsList>
+      <motion.div variants={containerAnim} initial="hidden" animate="show" className="glass-panel glow-border rounded-xl overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border/50">
+                <th className="text-left p-4 text-xs text-muted-foreground uppercase tracking-wider font-medium">Container</th>
+                <th className="text-left p-4 text-xs text-muted-foreground uppercase tracking-wider font-medium">Status</th>
+                <th className="text-left p-4 text-xs text-muted-foreground uppercase tracking-wider font-medium flex items-center gap-1">Risk <RiskTooltip /></th>
+                <th className="text-left p-4 text-xs text-muted-foreground uppercase tracking-wider font-medium">Trust Score</th>
+                <th className="text-left p-4 text-xs text-muted-foreground uppercase tracking-wider font-medium">Last Seen</th>
+                <th className="text-right p-4 text-xs text-muted-foreground uppercase tracking-wider font-medium">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="p-8 text-center text-muted-foreground">
+                    {safeContainers.length === 0 ? "No containers detected yet. Waiting for scanner..." : "No containers match your search."}
+                  </td>
+                </tr>
+              ) : (
+                filtered.map((c) => (
+                  <motion.tr key={c.id} variants={item} className="border-b border-border/30 hover:bg-accent/50 transition-colors">
+                    <td className="p-4">
+                      <div className="font-medium">{c.name}</div>
+                      <div className="font-mono-id text-muted-foreground mt-0.5">{c.id}</div>
+                    </td>
+                    <td className="p-4">
+                      <Badge variant="outline" className={`${statusColors[c.status] || statusColors.stopped} border-0 text-xs`}>
+                        {c.status}
+                      </Badge>
+                    </td>
+                    <td className="p-4">
+                      <Badge variant="outline" className={`${riskColors[c.riskLevel]} text-xs`}>
+                        {c.riskTier}
+                      </Badge>
+                    </td>
+                    <td className="p-4">
+                      <span className={`font-bold ${c.trustScore >= 80 ? "text-success-val" : c.trustScore >= 60 ? "text-signal" : "text-threat"}`}>
+                        {c.trustScore.toFixed(1)}
+                      </span>
+                    </td>
+                    <td className="p-4 text-muted-foreground text-xs">
+                      {formatTimestamp(c.lastSeen)}
+                    </td>
+                    <td className="p-4 text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <Button variant="ghost" size="sm" className="h-7 px-2 text-xs text-signal hover:text-signal"
+                          onClick={() => setActionTarget({ container: c, action: "quarantine" })}
+                          disabled={c.status === "quarantined"}
+                        >
+                          <ShieldOff className="h-3 w-3 mr-1" /> Quarantine
+                        </Button>
+                        <Button variant="ghost" size="sm" className="h-7 px-2 text-xs text-destructive hover:text-destructive"
+                          onClick={() => setActionTarget({ container: c, action: "kill" })}
+                        >
+                          <Zap className="h-3 w-3 mr-1" /> Kill
+                        </Button>
+                      </div>
+                    </td>
+                  </motion.tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </motion.div>
 
-        <TabsContent value="agents" className="mt-4">
-          <motion.div variants={container} initial="hidden" animate="show" className="glass-panel glow-border rounded-xl overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border/50">
-                    <th className="text-left p-4 text-xs text-muted-foreground uppercase tracking-wider font-medium">Agent</th>
-                    <th className="text-left p-4 text-xs text-muted-foreground uppercase tracking-wider font-medium">Status</th>
-                    <th className="text-left p-4 text-xs text-muted-foreground uppercase tracking-wider font-medium flex items-center gap-1">Risk <RiskTooltip /></th>
-                    <th className="text-left p-4 text-xs text-muted-foreground uppercase tracking-wider font-medium">Model</th>
-                    <th className="text-left p-4 text-xs text-muted-foreground uppercase tracking-wider font-medium">Last Seen</th>
-                    <th className="text-left p-4 text-xs text-muted-foreground uppercase tracking-wider font-medium">Cost/Day</th>
-                    <th className="text-right p-4 text-xs text-muted-foreground uppercase tracking-wider font-medium">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredAgents.map((agent) => (
-                    <motion.tr key={agent.id} variants={item} className="border-b border-border/30 hover:bg-accent/50 transition-colors">
-                      <td className="p-4">
-                        <div className="font-medium">{agent.name}</div>
-                        <div className="font-mono-id text-muted-foreground mt-0.5">{agent.id}</div>
-                      </td>
-                      <td className="p-4">
-                        <Badge variant="outline" className={`${statusColors[agent.status]} border-0 text-xs`}>{agent.status}</Badge>
-                      </td>
-                      <td className="p-4">
-                        <Badge variant="outline" className={`${riskColors[agent.riskLevel]} text-xs`}>{agent.riskScore} — {agent.riskLevel}</Badge>
-                      </td>
-                      <td className="p-4 font-mono-id">{agent.model}</td>
-                      <td className="p-4 text-muted-foreground text-xs">{formatTimestamp(agent.lastSeen)}</td>
-                      <td className="p-4 font-mono-id">${agent.costPerDay.toFixed(2)}</td>
-                      <td className="p-4 text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setInspectAgent(agent)}>
-                            <Eye className="h-3 w-3 mr-1" /> Inspect
-                          </Button>
-                          <Button variant="ghost" size="sm" className="h-7 px-2 text-xs text-destructive hover:text-destructive" onClick={() => setKillTarget(agent)}>
-                            <Zap className="h-3 w-3 mr-1" /> Kill
-                          </Button>
-                        </div>
-                      </td>
-                    </motion.tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </motion.div>
-        </TabsContent>
-
-        <TabsContent value="servers" className="mt-4">
-          <motion.div variants={container} initial="hidden" animate="show" className="glass-panel glow-border rounded-xl overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border/50">
-                    <th className="text-left p-4 text-xs text-muted-foreground uppercase tracking-wider font-medium">Server</th>
-                    <th className="text-left p-4 text-xs text-muted-foreground uppercase tracking-wider font-medium">Status</th>
-                    <th className="text-left p-4 text-xs text-muted-foreground uppercase tracking-wider font-medium flex items-center gap-1">Risk <RiskTooltip /></th>
-                    <th className="text-left p-4 text-xs text-muted-foreground uppercase tracking-wider font-medium">Region</th>
-                    <th className="text-left p-4 text-xs text-muted-foreground uppercase tracking-wider font-medium">Agents</th>
-                    <th className="text-left p-4 text-xs text-muted-foreground uppercase tracking-wider font-medium">Tools</th>
-                    <th className="text-left p-4 text-xs text-muted-foreground uppercase tracking-wider font-medium">Last Seen</th>
-                    <th className="text-right p-4 text-xs text-muted-foreground uppercase tracking-wider font-medium">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredServers.map((server) => (
-                    <motion.tr key={server.id} variants={item} className="border-b border-border/30 hover:bg-accent/50 transition-colors">
-                      <td className="p-4">
-                        <div className="font-medium">{server.name}</div>
-                        <div className="font-mono-id text-muted-foreground mt-0.5">{server.id}</div>
-                      </td>
-                      <td className="p-4">
-                        <Badge variant="outline" className={`${statusColors[server.status]} border-0 text-xs`}>{server.status}</Badge>
-                      </td>
-                      <td className="p-4">
-                        <Badge variant="outline" className={`${riskColors[server.riskLevel]} text-xs`}>{server.riskScore} — {server.riskLevel}</Badge>
-                      </td>
-                      <td className="p-4 font-mono-id">{server.region}</td>
-                      <td className="p-4">{server.connectedAgents}</td>
-                      <td className="p-4">{server.toolsExposed}</td>
-                      <td className="p-4 text-muted-foreground text-xs">{formatTimestamp(server.lastSeen)}</td>
-                      <td className="p-4 text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setInspectServer(server)}>
-                            <Eye className="h-3 w-3 mr-1" /> Inspect
-                          </Button>
-                          <Button variant="ghost" size="sm" className="h-7 px-2 text-xs text-signal hover:text-signal" onClick={() => setServerActionTarget({ server, action: "quarantine" })}>
-                            <ShieldOff className="h-3 w-3 mr-1" /> Quarantine
-                          </Button>
-                          <Button variant="ghost" size="sm" className="h-7 px-2 text-xs text-destructive hover:text-destructive" onClick={() => setServerActionTarget({ server, action: "kill" })}>
-                            <Zap className="h-3 w-3 mr-1" /> Kill
-                          </Button>
-                        </div>
-                      </td>
-                    </motion.tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </motion.div>
-        </TabsContent>
-      </Tabs>
-
-      {/* Dialogs */}
-      <AgentInspectDialog agent={inspectAgent} open={!!inspectAgent} onOpenChange={(v) => !v && setInspectAgent(null)} />
-      <ServerInspectDialog server={inspectServer} open={!!inspectServer} onOpenChange={(v) => !v && setInspectServer(null)} />
-      <KillSwitchDialog
-        agent={killTarget}
-        open={!!killTarget}
-        onOpenChange={(v) => !v && setKillTarget(null)}
-        onConfirm={(id) => killMutation.mutate({ agentId: id })}
-        isPending={killMutation.isPending}
-      />
-      <ServerActionDialog
-        server={serverActionTarget?.server ?? null}
-        actionType={serverActionTarget?.action ?? "quarantine"}
-        open={!!serverActionTarget}
-        onOpenChange={(v) => !v && setServerActionTarget(null)}
-        onConfirm={(id) => serverActionMutation.mutate({ actionType: serverActionTarget!.action, serverId: id })}
-        isPending={serverActionMutation.isPending}
-      />
+      {/* Unified action dialog — handles both Kill and Quarantine */}
+      {actionTarget && (
+        <ServerActionDialog
+          server={{
+            id: actionTarget.container.id,
+            name: actionTarget.container.name,
+            status: actionTarget.container.status === "running" ? "active" : "dormant",
+            riskScore: 100 - actionTarget.container.trustScore,
+            riskLevel: actionTarget.container.riskLevel,
+            lastSeen: actionTarget.container.lastSeen,
+            connectedAgents: 0,
+            toolsExposed: 0,
+            region: "local",
+            protocol: "docker",
+            trustScore: actionTarget.container.trustScore,
+          }}
+          actionType={actionTarget.action}
+          open={!!actionTarget}
+          onOpenChange={(v) => !v && setActionTarget(null)}
+          onConfirm={(id) => {
+            if (actionTarget.action === "kill") {
+              killMutation.mutate({ containerId: id });
+            } else {
+              quarantineMutation.mutate({ containerId: id });
+            }
+          }}
+          isPending={killMutation.isPending || quarantineMutation.isPending}
+        />
+      )}
     </motion.div>
   );
 }

@@ -193,3 +193,83 @@ def kill_container(container_id: str) -> bool:
             exc,
         )
         return False
+
+
+def remove_container(container_id: str, *, force: bool = True) -> bool:
+    """Stop and fully remove a container (manual kill via UI).
+
+    After this call the container will no longer appear in
+    ``docker ps -a``.  This is the destructive "Kill" action triggered
+    by the human operator from the frontend — distinct from the
+    autonomous remediator's ``kill_container()`` which only stops.
+
+    Args:
+        container_id: The container ID or name.
+        force: If ``True`` (default), force-remove even if running.
+
+    Returns:
+        ``True`` if the container was removed, ``False`` otherwise.
+    """
+    client = get_docker_client()
+    try:
+        container = client.containers.get(container_id)
+        name = container.name
+        short = container.short_id
+        logger.warning(
+            "Initiating REMOVE on container %s (%s) — force=%s",
+            name, short, force,
+        )
+        # Stop first (graceful 10s) then remove
+        try:
+            container.stop(timeout=10)
+        except Exception:
+            pass  # may already be stopped
+        container.remove(force=force)
+        logger.info("Container %s (%s) removed successfully", name, short)
+        return True
+    except NotFound:
+        logger.warning(
+            "Container %s already removed before remove_container could execute",
+            container_id,
+        )
+        return True  # already gone — success from the caller's perspective
+    except DockerException as exc:
+        logger.error("Failed to remove container %s: %s", container_id, exc)
+        return False
+
+
+def quarantine_container(container_id: str) -> bool:
+    """Stop a container without removing it (quarantine action).
+
+    The container transitions to an ``Exited`` state and remains visible
+    in ``docker ps -a``, but is no longer running.
+
+    Args:
+        container_id: The container ID or name.
+
+    Returns:
+        ``True`` if the container was stopped (quarantined), ``False``
+        otherwise.
+    """
+    client = get_docker_client()
+    try:
+        container = client.containers.get(container_id)
+        name = container.name
+        short = container.short_id
+        logger.warning(
+            "Initiating QUARANTINE (stop-only) on container %s (%s)",
+            name, short,
+        )
+        container.stop(timeout=10)
+        logger.info("Container %s (%s) quarantined (stopped)", name, short)
+        return True
+    except NotFound:
+        logger.warning(
+            "Container %s not found for quarantine", container_id,
+        )
+        return False
+    except DockerException as exc:
+        logger.error(
+            "Failed to quarantine container %s: %s", container_id, exc,
+        )
+        return False

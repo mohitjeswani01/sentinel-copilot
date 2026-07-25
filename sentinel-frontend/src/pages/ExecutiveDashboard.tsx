@@ -1,8 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
-import { getExecutiveMetrics } from "@/services/serviceApi";
+import { getExecutiveMetrics, getTrendData, type TrendDataPoint } from "@/services/serviceApi";
 import { motion } from "framer-motion";
 import { TrendingDown, TrendingUp, ShieldAlert, DollarSign, Bot, Shield } from "lucide-react";
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Line } from "recharts";
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Line, LineChart } from "recharts";
 import { Skeleton } from "@/components/ui/skeleton";
 import { RiskTooltip } from "@/components/discovery/AgentInspectDialog";
 import { DemoDataBadge } from "@/components/DemoDataBadge";
@@ -10,10 +10,27 @@ import { DemoDataBadge } from "@/components/DemoDataBadge";
 const container = { hidden: {}, show: { transition: { staggerChildren: 0.08 } } };
 const item = { hidden: { opacity: 0, y: 12 }, show: { opacity: 1, y: 0 } };
 
+function formatTrendTime(ts: string) {
+  try {
+    const d = new Date(ts);
+    if (isNaN(d.getTime())) return "";
+    return d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  } catch {
+    return "";
+  }
+}
+
 export default function ExecutiveDashboard() {
   const { data, isLoading } = useQuery({
     queryKey: ["executive-metrics"],
     queryFn: getExecutiveMetrics,
+    refetchInterval: 10_000,
+  });
+
+  const { data: trendData } = useQuery({
+    queryKey: ["metrics-trend"],
+    queryFn: getTrendData,
+    refetchInterval: 10_000,
   });
 
   if (isLoading || !data) {
@@ -38,6 +55,17 @@ export default function ExecutiveDashboard() {
     critical: "text-threat",
   }[data.threatLevel];
 
+  // Prepare trend chart data
+  const chartData = (trendData || []).map((point: TrendDataPoint) => ({
+    time: formatTrendTime(point.timestamp),
+    "Avg Trust Score": point.avg_trust_score,
+    "Critical": point.critical_count,
+    "High Risk": point.high_risk_count,
+    "Healthy": point.healthy_count,
+  }));
+
+  const hasTrendData = chartData.length > 0;
+
   return (
     <motion.div variants={container} initial="hidden" animate="show" className="space-y-6">
       {/* Header */}
@@ -52,7 +80,7 @@ export default function ExecutiveDashboard() {
         <motion.div variants={item} className="md:col-span-2 glass-panel glow-border rounded-xl p-6 card-hover">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-muted-foreground mb-1">Total Cost Eliminated <DemoDataBadge className="ml-2" /></p>
+              <p className="text-sm text-muted-foreground mb-1">Total Cost Eliminated </p>
               <div className="flex items-baseline gap-3">
                 <span className="text-4xl font-black text-cyber tracking-tight">
                   ${data.moneySaved.toLocaleString()}
@@ -114,47 +142,57 @@ export default function ExecutiveDashboard() {
         })}
       </motion.div>
 
-      {/* Bento Grid — Cost vs Risk Chart.
-          The API exposes only point-in-time metrics, so when no historical
-          series is available this renders an explicit empty state rather than a
-          hardcoded trend line. */}
+      {/* Trust Score Trend — Real live chart from rolling buffer */}
       <motion.div variants={item} className="glass-panel glow-border rounded-xl p-6 card-hover">
-        <p className="text-xs text-muted-foreground uppercase tracking-wider mb-4">Cost vs Risk Trend</p>
-        {data.costVsRiskTrend.length === 0 ? (
+        <p className="text-xs text-muted-foreground uppercase tracking-wider mb-4">Trust Score Trend (Live)</p>
+        {!hasTrendData ? (
           <div className="h-[240px] flex flex-col items-center justify-center text-center gap-2">
-            <p className="text-sm text-muted-foreground">No historical trend data available</p>
+            <p className="text-sm text-muted-foreground">Waiting for trend data...</p>
             <p className="text-xs text-muted-foreground max-w-md">
-              The Sentinel API reports current values only. Historical trends are
-              available in the SigNoz dashboards, which retain the
-              <span className="font-mono"> sentinel.container.* </span>
-              time series.
+              The trend chart will populate automatically as the background scanner
+              completes scan cycles. First data point appears within ~10 seconds.
             </p>
           </div>
         ) : (
-        <ResponsiveContainer width="100%" height={240}>
-          <AreaChart data={data.costVsRiskTrend}>
-            <defs>
-              <linearGradient id="costGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="hsl(187 100% 50%)" stopOpacity={0.3} />
-                <stop offset="95%" stopColor="hsl(187 100% 50%)" stopOpacity={0} />
-              </linearGradient>
-            </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="hsl(240 4% 16%)" />
-            <XAxis dataKey="month" tick={{ fill: "hsl(240 5% 55%)", fontSize: 12 }} axisLine={false} />
-            <YAxis tick={{ fill: "hsl(240 5% 55%)", fontSize: 12 }} axisLine={false} />
-            <Tooltip
-              contentStyle={{
-                backgroundColor: "hsl(240 6% 6%)",
-                border: "1px solid hsl(240 4% 16%)",
-                borderRadius: "8px",
-                color: "hsl(0 0% 95%)",
-                fontSize: 12,
-              }}
-            />
-            <Area type="monotone" dataKey="cost" stroke="hsl(187 100% 50%)" fill="url(#costGrad)" strokeWidth={2} />
-            <Line type="monotone" dataKey="risk" stroke="hsl(0 72% 51%)" strokeWidth={2} dot={false} />
-          </AreaChart>
-        </ResponsiveContainer>
+          <ResponsiveContainer width="100%" height={240}>
+            <LineChart data={chartData}>
+              <defs>
+                <linearGradient id="trustGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="hsl(187 100% 50%)" stopOpacity={0.3} />
+                  <stop offset="95%" stopColor="hsl(187 100% 50%)" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="hsl(240 4% 16%)" />
+              <XAxis
+                dataKey="time"
+                tick={{ fill: "hsl(240 5% 55%)", fontSize: 11 }}
+                axisLine={false}
+                interval="preserveStartEnd"
+              />
+              <YAxis
+                domain={[0, 100]}
+                tick={{ fill: "hsl(240 5% 55%)", fontSize: 11 }}
+                axisLine={false}
+              />
+              <Tooltip
+                contentStyle={{
+                  backgroundColor: "hsl(240 6% 6%)",
+                  border: "1px solid hsl(240 4% 16%)",
+                  borderRadius: "8px",
+                  color: "hsl(0 0% 95%)",
+                  fontSize: 12,
+                }}
+              />
+              <Line
+                type="monotone"
+                dataKey="Avg Trust Score"
+                stroke="hsl(187 100% 50%)"
+                strokeWidth={2.5}
+                dot={false}
+                activeDot={{ r: 4, fill: "hsl(187 100% 50%)" }}
+              />
+            </LineChart>
+          </ResponsiveContainer>
         )}
       </motion.div>
     </motion.div>
