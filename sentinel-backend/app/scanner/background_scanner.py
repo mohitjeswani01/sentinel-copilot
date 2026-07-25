@@ -175,6 +175,7 @@ async def _scan_loop() -> None:
                                 container_name=result["container_name"],
                                 trust_score=result["trust_score"],
                                 vector_scores=result["vector_scores"],
+                                risk_tier=result["risk_tier"],
                             )
                             # Fire copilot cycle as background task for risky containers.
                             # Import here to avoid circular imports at module level.

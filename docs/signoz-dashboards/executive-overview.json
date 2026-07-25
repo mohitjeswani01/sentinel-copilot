@@ -1,0 +1,427 @@
+{
+  "createdAt": "2026-07-25T08:57:23.487453Z",
+  "createdBy": "sentinel-dashboards@signozserviceaccount.com",
+  "data": {
+    "description": "Fleet-wide Shadow AI governance posture from the Sentinel Copilot trust engine: average fleet trust score, distribution of containers across risk tiers, per-container trust trends, and which trust vector is currently dragging scores down. All panels read live sentinel.container.* gauges emitted to SigNoz via OTLP.",
+    "layout": [
+      {
+        "h": 6,
+        "i": "fleet-trust-avg",
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      {
+        "h": 6,
+        "i": "containers-by-tier",
+        "w": 6,
+        "x": 0,
+        "y": 6
+      },
+      {
+        "h": 6,
+        "i": "vector-current",
+        "w": 6,
+        "x": 6,
+        "y": 6
+      },
+      {
+        "h": 7,
+        "i": "per-container-trust",
+        "w": 12,
+        "x": 0,
+        "y": 12
+      }
+    ],
+    "tags": [
+      "sentinel-copilot",
+      "shadow-ai",
+      "executive",
+      "trust-score"
+    ],
+    "title": "Sentinel Copilot — Executive Overview",
+    "variables": {},
+    "version": "v5",
+    "widgets": [
+      {
+        "contextLinks": {
+          "linksData": null
+        },
+        "description": "Average sentinel.container.trust_score across every scanned container. Tier thresholds: <40 CRITICAL, 40-60 HIGH RISK, 60-80 ELEVATED, >=80 HEALTHY.",
+        "fillSpans": false,
+        "id": "fleet-trust-avg",
+        "nullZeroValues": "zero",
+        "opacity": "1",
+        "panelTypes": "graph",
+        "query": {
+          "builder": {
+            "queryData": [
+              {
+                "aggregations": [
+                  {
+                    "metricName": "sentinel.container.trust_score",
+                    "spaceAggregation": "avg",
+                    "temporality": "Unspecified",
+                    "timeAggregation": "avg"
+                  }
+                ],
+                "dataSource": "metrics",
+                "disabled": false,
+                "expression": "A",
+                "filter": {
+                  "expression": ""
+                },
+                "functions": [],
+                "groupBy": [],
+                "having": [],
+                "legend": "Fleet average",
+                "limit": 100,
+                "orderBy": [
+                  {
+                    "columnName": "__result",
+                    "order": "desc"
+                  }
+                ],
+                "queryName": "A",
+                "selectColumns": [],
+                "stepInterval": 60
+              }
+            ],
+            "queryFormulas": []
+          },
+          "id": "b76afc05-241b-421c-b611-3bb000efcfa8",
+          "queryType": "builder"
+        },
+        "selectedLogFields": [],
+        "selectedTracesFields": [],
+        "softMax": 100,
+        "softMin": 0,
+        "timePreferance": "GLOBAL_TIME",
+        "title": "Fleet Trust Score (Average)",
+        "yAxisUnit": "none"
+      },
+      {
+        "contextLinks": {
+          "linksData": null
+        },
+        "description": "Count of containers currently in each risk tier, grouped by the risk_tier metric attribute emitted by the scorer (CRITICAL / HIGH RISK / ELEVATED / HEALTHY). Only tiers with at least one container appear.",
+        "fillSpans": false,
+        "id": "containers-by-tier",
+        "nullZeroValues": "zero",
+        "opacity": "1",
+        "panelTypes": "bar",
+        "query": {
+          "builder": {
+            "queryData": [
+              {
+                "aggregations": [
+                  {
+                    "metricName": "sentinel.container.trust_score",
+                    "reduceTo": "last",
+                    "spaceAggregation": "count",
+                    "temporality": "Unspecified",
+                    "timeAggregation": "latest"
+                  }
+                ],
+                "dataSource": "metrics",
+                "disabled": false,
+                "expression": "A",
+                "filter": {
+                  "expression": ""
+                },
+                "functions": [],
+                "groupBy": [
+                  {
+                    "dataType": "string",
+                    "key": "risk_tier",
+                    "type": "tag"
+                  }
+                ],
+                "having": [],
+                "legend": "{{risk_tier}}",
+                "limit": 100,
+                "orderBy": [
+                  {
+                    "columnName": "__result",
+                    "order": "desc"
+                  }
+                ],
+                "queryName": "A",
+                "reduceTo": "last",
+                "selectColumns": [],
+                "stepInterval": 60
+              }
+            ],
+            "queryFormulas": []
+          },
+          "id": "31a8a259-183f-4730-8b75-f7cb319e755a",
+          "queryType": "builder"
+        },
+        "selectedLogFields": [],
+        "selectedTracesFields": [],
+        "softMax": 100,
+        "softMin": 0,
+        "timePreferance": "GLOBAL_TIME",
+        "title": "Containers by Risk Tier",
+        "yAxisUnit": "none"
+      },
+      {
+        "contextLinks": {
+          "linksData": null
+        },
+        "description": "Most recent fleet-wide value of each of the 5 trust vectors. The shortest bar is the dimension dragging the fleet trust score down. Note: LLM Behavior reports a neutral 100 when no LLM telemetry is found.",
+        "fillSpans": false,
+        "id": "vector-current",
+        "nullZeroValues": "zero",
+        "opacity": "1",
+        "panelTypes": "bar",
+        "query": {
+          "builder": {
+            "queryData": [
+              {
+                "aggregations": [
+                  {
+                    "metricName": "sentinel.container.vector.identity",
+                    "reduceTo": "last",
+                    "spaceAggregation": "avg",
+                    "temporality": "Unspecified",
+                    "timeAggregation": "latest"
+                  }
+                ],
+                "dataSource": "metrics",
+                "disabled": false,
+                "expression": "A",
+                "filter": {
+                  "expression": ""
+                },
+                "functions": [],
+                "groupBy": [],
+                "having": [],
+                "legend": "Identity",
+                "limit": 100,
+                "orderBy": [
+                  {
+                    "columnName": "__result",
+                    "order": "desc"
+                  }
+                ],
+                "queryName": "A",
+                "reduceTo": "last",
+                "selectColumns": [],
+                "stepInterval": 60
+              },
+              {
+                "aggregations": [
+                  {
+                    "metricName": "sentinel.container.vector.configuration",
+                    "reduceTo": "last",
+                    "spaceAggregation": "avg",
+                    "temporality": "Unspecified",
+                    "timeAggregation": "latest"
+                  }
+                ],
+                "dataSource": "metrics",
+                "disabled": false,
+                "expression": "B",
+                "filter": {
+                  "expression": ""
+                },
+                "functions": [],
+                "groupBy": [],
+                "having": [],
+                "legend": "Configuration",
+                "limit": 100,
+                "orderBy": [
+                  {
+                    "columnName": "__result",
+                    "order": "desc"
+                  }
+                ],
+                "queryName": "B",
+                "reduceTo": "last",
+                "selectColumns": [],
+                "stepInterval": 60
+              },
+              {
+                "aggregations": [
+                  {
+                    "metricName": "sentinel.container.vector.network",
+                    "reduceTo": "last",
+                    "spaceAggregation": "avg",
+                    "temporality": "Unspecified",
+                    "timeAggregation": "latest"
+                  }
+                ],
+                "dataSource": "metrics",
+                "disabled": false,
+                "expression": "C",
+                "filter": {
+                  "expression": ""
+                },
+                "functions": [],
+                "groupBy": [],
+                "having": [],
+                "legend": "Network",
+                "limit": 100,
+                "orderBy": [
+                  {
+                    "columnName": "__result",
+                    "order": "desc"
+                  }
+                ],
+                "queryName": "C",
+                "reduceTo": "last",
+                "selectColumns": [],
+                "stepInterval": 60
+              },
+              {
+                "aggregations": [
+                  {
+                    "metricName": "sentinel.container.vector.resources",
+                    "reduceTo": "last",
+                    "spaceAggregation": "avg",
+                    "temporality": "Unspecified",
+                    "timeAggregation": "latest"
+                  }
+                ],
+                "dataSource": "metrics",
+                "disabled": false,
+                "expression": "D",
+                "filter": {
+                  "expression": ""
+                },
+                "functions": [],
+                "groupBy": [],
+                "having": [],
+                "legend": "Resources",
+                "limit": 100,
+                "orderBy": [
+                  {
+                    "columnName": "__result",
+                    "order": "desc"
+                  }
+                ],
+                "queryName": "D",
+                "reduceTo": "last",
+                "selectColumns": [],
+                "stepInterval": 60
+              },
+              {
+                "aggregations": [
+                  {
+                    "metricName": "sentinel.container.vector.llm_behavior",
+                    "reduceTo": "last",
+                    "spaceAggregation": "avg",
+                    "temporality": "Unspecified",
+                    "timeAggregation": "latest"
+                  }
+                ],
+                "dataSource": "metrics",
+                "disabled": false,
+                "expression": "E",
+                "filter": {
+                  "expression": ""
+                },
+                "functions": [],
+                "groupBy": [],
+                "having": [],
+                "legend": "LLM Behavior",
+                "limit": 100,
+                "orderBy": [
+                  {
+                    "columnName": "__result",
+                    "order": "desc"
+                  }
+                ],
+                "queryName": "E",
+                "reduceTo": "last",
+                "selectColumns": [],
+                "stepInterval": 60
+              }
+            ],
+            "queryFormulas": []
+          },
+          "id": "da03f110-8c5e-473d-8eac-2f51959a787d",
+          "queryType": "builder"
+        },
+        "selectedLogFields": [],
+        "selectedTracesFields": [],
+        "softMax": 100,
+        "softMin": 0,
+        "timePreferance": "GLOBAL_TIME",
+        "title": "Current Score by Trust Vector (Lowest = Biggest Drag)",
+        "yAxisUnit": "none"
+      },
+      {
+        "contextLinks": {
+          "linksData": null
+        },
+        "description": "Individual trust-score trend for every scanned container, broken down by the container_name attribute.",
+        "fillSpans": false,
+        "id": "per-container-trust",
+        "nullZeroValues": "zero",
+        "opacity": "1",
+        "panelTypes": "graph",
+        "query": {
+          "builder": {
+            "queryData": [
+              {
+                "aggregations": [
+                  {
+                    "metricName": "sentinel.container.trust_score",
+                    "spaceAggregation": "avg",
+                    "temporality": "Unspecified",
+                    "timeAggregation": "avg"
+                  }
+                ],
+                "dataSource": "metrics",
+                "disabled": false,
+                "expression": "A",
+                "filter": {
+                  "expression": ""
+                },
+                "functions": [],
+                "groupBy": [
+                  {
+                    "dataType": "string",
+                    "key": "container_name",
+                    "type": "tag"
+                  }
+                ],
+                "having": [],
+                "legend": "{{container_name}}",
+                "limit": 100,
+                "orderBy": [
+                  {
+                    "columnName": "__result",
+                    "order": "desc"
+                  }
+                ],
+                "queryName": "A",
+                "selectColumns": [],
+                "stepInterval": 60
+              }
+            ],
+            "queryFormulas": []
+          },
+          "id": "de7483c6-c24b-4d1f-ab0d-1f31f03bea6e",
+          "queryType": "builder"
+        },
+        "selectedLogFields": [],
+        "selectedTracesFields": [],
+        "softMax": 100,
+        "softMin": 0,
+        "timePreferance": "GLOBAL_TIME",
+        "title": "Per-Container Trust Score",
+        "yAxisUnit": "none"
+      }
+    ]
+  },
+  "id": "019f987e-531f-77b7-9618-111579a3c9ae",
+  "locked": false,
+  "org_id": "019f9868-4562-7da3-9737-0910cb48d40c",
+  "source": "user",
+  "updatedAt": "2026-07-25T08:57:23.487453Z",
+  "updatedBy": "sentinel-dashboards@signozserviceaccount.com",
+  "webUrl": "http://signoz-signoz-0:8080/dashboard/019f987e-531f-77b7-9618-111579a3c9ae"
+}
