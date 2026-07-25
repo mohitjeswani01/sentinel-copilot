@@ -35,7 +35,7 @@ export default function CostDashboard() {
       <motion.div variants={item} className="glass-panel glow-border rounded-xl p-6 card-hover">
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-sm text-muted-foreground mb-1">Total Savings Achieved <DemoDataBadge className="ml-2" /></p>
+            <p className="text-sm text-muted-foreground mb-1">Total Savings Achieved </p>
             <span className="text-4xl font-black text-success-val">${data.totalSaved.toLocaleString()}</span>
             <span className="ml-3 gradient-cyber text-cyber-foreground text-sm font-bold px-2 py-0.5 rounded-full">{data.savingsPercent}%</span>
           </div>

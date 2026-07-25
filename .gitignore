@@ -10,3 +10,5 @@ build/
 .env
 .vscode/
 .idea/
+__pycache__/
+*.pyc

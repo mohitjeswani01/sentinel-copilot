@@ -18,11 +18,11 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
-from app.core.docker_bridge import kill_container
+from app.core.docker_bridge import kill_container, remove_container, quarantine_container
 from app.copilot.investigator import Investigator
 from app.copilot.loop import run_copilot_cycle
-from app.models.schemas import AuditLogEntry, InvestigationResult, get_audit_log
-from app.scanner.background_scanner import get_container_result, get_scan_results
+from app.models.schemas import AuditLogEntry, InvestigationResult, append_audit_entry, get_audit_log
+from app.scanner.background_scanner import get_container_result, get_scan_results, get_trend_buffer
 
 logger = logging.getLogger(__name__)
 
@@ -58,22 +58,34 @@ async def get_container_detail(container_id: str) -> dict[str, Any]:
 
 @router.post("/containers/{container_id}/kill", tags=["containers"])
 async def kill_container_endpoint(container_id: str) -> dict[str, Any]:
-    """Manually stop/kill a container (human-triggered via API/frontend).
+    """Manually REMOVE a container (human-triggered via API/frontend).
 
-    Calls ``docker_bridge.kill_container()`` and returns success/failure.
-    This is a MANUAL kill switch — no autonomous logic.
+    Calls ``docker_bridge.remove_container()`` which stops AND removes
+    the container — it will no longer appear in ``docker ps -a``.
+    This is the manual "Kill" button in the UI.
     """
     try:
-        success = kill_container(container_id)
+        success = remove_container(container_id)
         if success:
+            # Write audit log entry
+            scan_result = get_container_result(container_id)
+            entry = AuditLogEntry(
+                container_id=container_id,
+                container_name=scan_result["container_name"] if scan_result else container_id,
+                trust_score=scan_result["trust_score"] if scan_result else 0.0,
+                risk_tier=scan_result["risk_tier"] if scan_result else "UNKNOWN",
+                action="manual_kill",
+                reason="Container removed via manual Kill button in UI",
+            )
+            append_audit_entry(entry)
             return {
                 "success": True,
-                "message": f"Container '{container_id}' stopped successfully",
+                "message": f"Container '{container_id}' removed successfully",
             }
         else:
             return {
                 "success": False,
-                "message": f"Failed to stop container '{container_id}' — it may already be stopped or removed",
+                "message": f"Failed to remove container '{container_id}' — it may already be removed",
             }
     except ConnectionError as exc:
         raise HTTPException(
@@ -84,6 +96,47 @@ async def kill_container_endpoint(container_id: str) -> dict[str, Any]:
         raise HTTPException(
             status_code=500,
             detail=f"Error killing container: {exc}",
+        ) from exc
+
+
+@router.post("/containers/{container_id}/quarantine", tags=["containers"])
+async def quarantine_container_endpoint(container_id: str) -> dict[str, Any]:
+    """Quarantine a container — stops it without removing.
+
+    The container transitions to Exited state and remains visible in
+    ``docker ps -a``.  This is the manual "Quarantine" button.
+    """
+    try:
+        success = quarantine_container(container_id)
+        if success:
+            scan_result = get_container_result(container_id)
+            entry = AuditLogEntry(
+                container_id=container_id,
+                container_name=scan_result["container_name"] if scan_result else container_id,
+                trust_score=scan_result["trust_score"] if scan_result else 0.0,
+                risk_tier=scan_result["risk_tier"] if scan_result else "UNKNOWN",
+                action="quarantined",
+                reason="Container quarantined (stopped) via manual Quarantine button in UI",
+            )
+            append_audit_entry(entry)
+            return {
+                "success": True,
+                "message": f"Container '{container_id}' quarantined (stopped) successfully",
+            }
+        else:
+            return {
+                "success": False,
+                "message": f"Failed to quarantine container '{container_id}'",
+            }
+    except ConnectionError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Docker daemon unreachable: {exc}",
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error quarantining container: {exc}",
         ) from exc
 
 
@@ -185,8 +238,9 @@ async def metrics_summary() -> dict[str, Any]:
 async def discovery_shadow_ai() -> list[dict[str, Any]]:
     """Container discovery — consumed by the frontend's DiscoveryDashboard.
 
-    Returns containers shaped with ``trust_score``, ``is_sanctioned``,
-    ``image``, etc. to match what ``serviceApi.ts`` ``getDiscovery()`` expects.
+    Returns a flat list of ALL monitored containers with trust scores.
+    No artificial split into 'agents' vs 'servers' — they're all Docker
+    containers being scanned.
     """
     results = get_scan_results()
     out: list[dict[str, Any]] = []
@@ -202,7 +256,8 @@ async def discovery_shadow_ai() -> list[dict[str, Any]]:
             "is_sanctioned": identity_score >= 80,
             "image": res["container_name"],
             "trust_details": res.get("vector_scores", {}),
-            "type": "mcp_server",
+            "last_seen": res.get("last_seen", datetime.now(timezone.utc).isoformat()),
+            "type": "container",
         })
 
     return out
@@ -247,6 +302,13 @@ async def security_alerts() -> list[dict[str, Any]]:
 async def governance_terminate(container_id: str) -> dict[str, Any]:
     """Frontend-compatible terminate endpoint (wraps the kill endpoint)."""
     return await kill_container_endpoint(container_id)
+
+
+@router.get("/governance/quarantine/{container_id}", tags=["governance"])
+@router.post("/governance/quarantine/{container_id}", tags=["governance"])
+async def governance_quarantine(container_id: str) -> dict[str, Any]:
+    """Frontend-compatible quarantine endpoint."""
+    return await quarantine_container_endpoint(container_id)
 
 
 @router.get("/governance/audit-logs", tags=["governance"])
@@ -358,3 +420,14 @@ async def system_health() -> dict[str, Any]:
         "status": "operational" if total > 0 else "no_containers",
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
+
+
+@router.get("/metrics/trend", tags=["metrics"])
+async def metrics_trend() -> list[dict[str, Any]]:
+    """Return the rolling trend buffer — real data from scan cycles.
+
+    Each data point is appended after a scan cycle completes and contains:
+    ``timestamp``, ``avg_trust_score``, ``critical_count``,
+    ``high_risk_count``, ``healthy_count``.
+    """
+    return list(get_trend_buffer())
