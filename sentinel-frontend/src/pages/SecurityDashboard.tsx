@@ -6,7 +6,7 @@ import { ShieldAlert, AlertTriangle, Clock, CheckCircle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { DemoDataBadge } from "@/components/DemoDataBadge";
+import { LlmBehaviorPanel } from "@/components/LlmBehaviorPanel";
 
 const severityConfig: Record<string, { color: string; bg: string }> = {
   critical: { color: "text-threat", bg: "bg-threat\/10" },
@@ -52,7 +52,9 @@ export default function SecurityDashboard() {
           <ShieldAlert className="h-6 w-6 text-destructive-foreground" />
           <div>
             <p className="font-bold text-destructive-foreground">CRITICAL THREAT LEVEL</p>
-            <p className="text-sm text-destructive-foreground/80">Immediate action required — active data exfiltration detected</p>
+            <p className="text-sm text-destructive-foreground/80">
+              {data.counts.critical} container{data.counts.critical === 1 ? "" : "s"} in the CRITICAL trust tier — immediate review required
+            </p>
           </div>
         </motion.div>
       )}
@@ -98,9 +100,29 @@ export default function SecurityDashboard() {
         ))}
       </motion.div>
 
+      {/* LLM Behavior vector (Issue #7) */}
+      <motion.div variants={item}>
+        <LlmBehaviorPanel />
+      </motion.div>
+
       {/* Alert Cards */}
       <AnimatePresence mode="popLayout">
         <div className="space-y-3">
+          {filtered.length === 0 && (
+            <div className="glass-panel glow-border rounded-xl p-6 flex items-center gap-3">
+              <CheckCircle className="h-5 w-5 text-success-val shrink-0" />
+              <div>
+                <p className="font-semibold">
+                  {data.alerts.length === 0 ? "No active alerts" : `No ${filter} alerts`}
+                </p>
+                <p className="text-sm text-muted-foreground mt-0.5">
+                  {data.alerts.length === 0
+                    ? "No container is currently in the CRITICAL or HIGH RISK trust tier."
+                    : "Try a different severity filter."}
+                </p>
+              </div>
+            </div>
+          )}
           {filtered.map((alert) => {
             const StatusIcon = statusIcons[alert.status] || AlertTriangle;
             const config = severityConfig[alert.severity];
@@ -120,7 +142,6 @@ export default function SecurityDashboard() {
                         {alert.severity}
                       </Badge>
                       <span className="font-mono-id text-muted-foreground">{alert.id}</span>
-                      <DemoDataBadge />
                     </div>
                     <h3 className="font-semibold">{alert.violationType}</h3>
                     <p className="text-sm text-muted-foreground mt-1">{alert.description}</p>
